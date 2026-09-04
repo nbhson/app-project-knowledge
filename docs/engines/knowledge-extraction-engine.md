@@ -1,0 +1,6 @@
+Entities
+Concepts
+Relationships
+Decisions
+Constraints
+Business Rules
