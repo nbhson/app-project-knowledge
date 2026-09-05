@@ -304,6 +304,33 @@ class SourceReference(BaseModel):
 
 ---
 
+## Comparison with Alternatives
+
+SO SÁNH VỚI CÁC PHƯƠNG ÁN THAY THẾ
+
+| Tiêu chí | PKH | Công cụ wiki truyền thống (Confluence, Notion) | Công cụ tìm kiếm mã (Sourcegraph, GitHub Code Search) | Hệ thống RAG tổng quát |
+|----------|-----|-----------------------------------------------|------------------------------------------------------|----------------------|
+| **Cấu trúc kiến trúc** | ✅ Đối tượng có cấu trúc + mối quan hệ | ❌ Văn bản tự do, ít cấu trúc | ❌ Chỉ mã, không có mối quan hệ sémantics | ⚠️ Phụ thuộc vào chunking, thiếu ontology |
+| **Nguồn gốc truy vết** | ✅ SourceReference bắt buộc | ❌ Thường thiếu hoặc thủ công | ✅ Liên kết trực tiếp tới mã | ⚠️ Thường thiếu, phụ thuộc vào metadata |
+| **Điểm số độ tin cậy** | ✅ 0.0-1.0 cho mọi kiến thức trích xuất | ❌ Không có | ❌ Không áp dụng (mã là nguồn thật) | ⚠️ Có đôi khi nhưng không nhất quán |
+| **Chu kỳ đời sống** | ✅ Đầy đủ (7 trạng thái, quy chuyển đổi) | ❌ Tĩnh | ❌ Không áp dụng | ❌ Thường thiếu |
+| **Độc lập mô hình** | ✅ ContextPackage + Adapter | ❌ Thường gắn với UI cụ thể | ✅ API độc lập | ⚠️ Thụ động phụ thuộc qua prompt |
+| **Phạm vi kiến thức** | ✅ Toàn bộ (mã, dự án, tài liệu, hệ thống) | ❌ Chủ yếu tài liệu | ❌ Chỉ mã | ⚠️ Phụ thuộc vào nguồn dữ liệu đầu vào |
+| **Chất lượng đo lường** | ✅ Framework toàn diện | ❌ Hạn chế | ⚠️ Một số metrics | ⚠️ Phụ thuộc vào triển khai cụ thể |
+
+---
+
+## Kết luận
+
+PKH là một trong những thiết kế kiến thức dự án tốt nhất và hoàn chỉnh nhất trong tài liệu. Nó thành công trong việc:
+
+- **Giải quyết vấn đề đúng**: Thông tin dự án phân mảnh là một vấn đề thực tế và đáng kể trong phát triển phần mềm
+- **Áp dụng nguyên tắc thiết kế vững vàng**: Knowledge First, Source Traceability, Confidence Scoring, Model Independence
+- **Cung cấp giải pháp cụ thể và có thể đo lường**: Các thực thể, mối quan hệ, chu kỳ đời sống, và framework đánh giá rõ ràng
+- **Cân bằng giữa lý tưởng và thực tiễn**: Từ ví dụ cụ thể (ADR lifecycle, PaymentService) đến CLI và cấu hình YAML thực tế
+
+---
+
 ## Design Principles
 
 1. **Knowledge First** — Model is replaceable, knowledge is permanent
