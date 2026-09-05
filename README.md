@@ -6,19 +6,19 @@
 
 ```mermaid
 graph TD
-    A[DATA SOURCES\nGit Repo | Confluence | Jira | Documents | API Specs] --> B[① INGESTION ENGINE]
+    A[DATA SOURCES<br/>Git Repo \| Confluence \| Jira \| Documents \| API Specs] --> B[① INGESTION ENGINE]
 
     B --> C{Code or Docs?}
-    C -->|Code| D[② CODE INTELLIGENCE ENGINE\ntree-sitter | AST | Symbols | Call graphs]
-    C -->|Docs| E[③ KNOWLEDGE EXTRACTION ENGINE\nHybrid: Rule-based + LLM-assisted]
+    C -->|Code| D[② CODE INTELLIGENCE ENGINE<br/>tree-sitter \| AST \| Symbols \| Call graphs]
+    C -->|Docs| E[③ KNOWLEDGE EXTRACTION ENGINE<br/>Hybrid: Rule-based + LLM-assisted]
 
     D --> E
-    E --> F[④ KNOWLEDGE STORAGE ENGINE\nVector Store | Graph Store | Metadata Store | Raw Sources]
+    E --> F[④ KNOWLEDGE STORAGE ENGINE<br/>Vector Store \| Graph Store \| Metadata Store \| Raw Sources]
 
-    F --> G[⑤ RETRIEVAL INTELLIGENCE ENGINE\nIntent → Plan → Hybrid Retrieve → Rerank → Dedup]
-    G --> H[⑥ CONTEXT DELIVERY ENGINE\nContextPackage | 5-tier compression | Model adapters]
+    F --> G[⑤ RETRIEVAL INTELLIGENCE ENGINE<br/>Intent → Plan → Hybrid Retrieve → Rerank → Dedup]
+    G --> H[⑥ CONTEXT DELIVERY ENGINE<br/>ContextPackage \| 5-tier compression \| Model adapters]
 
-    H --> I[CONSUMERS\nCLI | REST API | IDE | Agent SDK]
+    H --> I[CONSUMERS<br/>CLI \| REST API \| IDE \| Agent SDK]
 ```
 
 ## Design Principles
