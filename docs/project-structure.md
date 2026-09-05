@@ -53,35 +53,30 @@ project-knowledge-harness/
 │   └── plan/                          # Planning documents
 │       └── plan.md
 │
-└── (source code)                      # Python source code (to be added)
-    ├── pkh/                           # Main package
+└── (source code) — ⏳ PLANNED, NOT YET IMPLEMENTED (see docs/plan/plan.md)
+    ├── pkh/                           # Main package (planned)
     │   ├── __init__.py
-    │   ├── models/                    # Pydantic models (KnowledgeObject, etc.)
-    │   ├── engines/                   # Engine implementations
-    │   ├── storage/                   # Storage layer implementations
-    │   ├── retrieval/                 # Retrieval and query logic
-    │   ├── ingestion/                 # Source connectors and ingestion pipeline
-    │   ├── adapters/                  # LLM adapters
-    │   ├── cli/                       # CLI commands (Typer)
+    │   ├── models/                    # KnowledgeObject, SourceReference, enums
+    │   ├── engines/                   # Engine 1-6 implementations
+    │   ├── storage/                   # Vector, Graph, Metadata backends
+    │   ├── adapters/                  # LLM adapters (Claude, GPT, Gemini, Mock)
+    │   ├── cli/                       # Typer CLI commands
     │   ├── api/                       # FastAPI routes and middleware
-    │   ├── config/                    # Configuration management
-    │   └── utils/                     # Utility functions
+    │   ├── config/                    # Pydantic Settings (YAML + env PKH_)
+    │   └── utils/                     # Logging, exceptions
     │
-    ├── pyproject.toml                 # Poetry/project configuration
-    ├── requirements.txt               # Python dependencies
-    ├── config/                        # Configuration files
+    ├── pyproject.toml                 # Project config (planned — Phase 0 Day 1)
+    ├── config/                        # Configuration files (planned)
     │   ├── settings.yaml              # Default settings
-    │   ├── settings.dev.yaml          # Development settings
+    │   ├── settings.yaml.example      # Template with all sections
     │   └── settings.prod.yaml         # Production settings
     │
-    ├── tests/                         # Test suite
-    │   ├── conftest.py                # pytest fixtures
-    │   ├── test_models.py
-    │   ├── test_engines/
-    │   ├── test_storage/
-    │   └── test_api/
+    ├── tests/                         # Test suite (planned — required per phase)
+    │   ├── conftest.py
+    │   ├── unit/
+    │   └── integration/
     │
-    └── docker-compose.yml             # Development orchestration
+    └── docker-compose.yml             # Development orchestration (spec)
 ```
 
 ## Documentation Index
@@ -113,11 +108,12 @@ project-knowledge-harness/
 - **context-delivery-engine.md**: Engine 6 - ContextPackage assembly and compression
 
 ### Other Documentation
-- **overall-architecture.md**: Complete architecture diagram and data flows
+- **overall-architecture.md**: Big-picture (4 Domains + Consumers) — see note vs `core/2-architecture.md`
 - **tech-stack.md**: Detailed technology breakdown by category
-- **deployment-guide.md**: Dev/prod setup, Docker, Kubernetes, CI/CD
+- **deployment-guide.md**: Dev/prod setup, Docker, Kubernetes, CI/CD (spec until `src/` exists)
 - **troubleshooting-guide.md**: Common issues and solutions
 - **glossary.md**: Key terminology definitions
+- **decisions/**: ADRs — rationale for Python/Pydantic, storage, tree-sitter, LLM adapter, RRF
 
 ## Getting Started
 

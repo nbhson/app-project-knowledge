@@ -148,6 +148,36 @@ Confidence can be boosted or demoted:
 - **Boost**: Knowledge from authoritative source (Git code > Confluence doc for implementation facts)
 - **Demote**: Knowledge that conflicts with higher-confidence knowledge
 
+### Calibration (Bắt buộc)
+
+Confidence do LLM tự gán thường over-confident. Mỗi LLM adapter phải có calibration:
+- **Rule-based = 1.0** (không cần calibrate)
+- **LLM:** lưu cặp `(llm_raw_confidence, human_verified_accuracy)` cho 100 sample đầu tiên; hiệu chỉnh bằng isotonic regression hoặc đơn giản `calibrated = raw * 0.8 + 0.1` cho đến khi có dữ liệu. Đánh giá calibration qua `docs/core/8-evaluation-framework.md` (reliability diagram).
+
+---
+
+## Cost Control — LLM Không Phải Là Pass Mặc Định
+
+> **Rủi ro:** 3-pass pipeline nếu gọi LLM cho mọi RawItem sẽ cháy token.
+
+**Quy tắc chi phí:**
+1. **Rule-first, LLM-only-if-needed:** MVP *không gọi LLM* (Day 12-13 mock). Full mới bật LLM cho các case rule không cover (long prose, implicit dependencies). Mặc định `llm_enabled=false` trong config.
+2. **Batching:** Gom 10-20 RawItems thành 1 prompt (giảm overhead system prompt). Max batch tokens = 4000.
+3. **Caching:** Cache `hash(content) → ExtractionOutput` trong Metadata Store (`extraction_cache` table, TTL 7 ngày). Hit thì không gọi LLM.
+4. **Budget guard:** `config.extraction.llm_budget_per_run` (ví dụ: 50k tokens/run). Vượt ngưỡng → dừng LLM, log warning, phần còn lại chỉ chạy rule-based.
+5. **MockAdapter cho CI:** `pytest` bắt buộc dùng `MockAdapter` (không gọi API thật) — test LLM prompt bằng golden file, không bằng live call.
+6. **Metrics:** Mỗi run ghi `llm_calls, prompt_tokens, completion_tokens, cost_usd` vào `extraction_stats` và expose qua `pkh status`.
+
+```yaml
+extraction:
+  llm_enabled: false          # bật true chỉ khi cần
+  llm_adapter: mock            # mock | openai | claude | gemini | local
+  batch_size: 15
+  cache_ttl_days: 7
+  budget_per_run_tokens: 50000
+  fallback: rule_only          # nếu LLM fail thì chỉ trả về rule-based
+```
+
 ---
 
 ## Output

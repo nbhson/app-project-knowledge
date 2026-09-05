@@ -1,19 +1,20 @@
 # Daily Implementation Plan
 
 > **Project:** Project Knowledge Harness (PKH)
-> **Total Days:** 30
+> **Total Days:** 45 (was 30 — +15 buffer for integration/hardening)
 > **Goal:** Transform fragmented project information into a continuously evolving, connected, model-independent knowledge system
 
 ---
 
 ## 📋 Overview
 
-This directory contains 30 daily implementation files, each with:
+This directory contains 45 daily implementation files, each with:
 - 🎯 Clear daily target
 - ✅ Actionable tasks
 - 📋 Acceptance criteria
 - 🔗 Dependencies (what blocks/blocked)
 - 📝 Implementation notes
+> **45-day note:** Day 1-30 giữ nguyên như 30-day plan; Day 31-45 là buffer mở rộng cho outbox/reconciler (Day 26-28), RRF tuning (Day 33-34), RBAC (Day 40-41), và hardening (Day 45). Xem `../plan.md` cho timeline mới.
 
 ---
 
@@ -50,38 +51,56 @@ This directory contains 30 daily implementation files, each with:
 | 27 | 7 — CLI/API | CLI Interface | [day-27.md](day-27.md) |
 | 28 | 7 — CLI/API | REST API | [day-28.md](day-28.md) |
 | 29 | 7 — CLI/API | End-to-End Integration | [day-29.md](day-29.md) |
-| 30 | 8 — Polish | Evaluation, Docs & Polish | [day-30.md](day-30.md) |
+| 30 | 8 — Polish | Evaluation, Docs & Polish (part 1) | [day-30.md](day-30.md) |
+| 31 | 5 — Retrieval | Hybrid Retrieval (RRF) — buffer | [day-31.md](day-31.md) |
+| 32 | 5 — Retrieval | Graph Traversal & Reranking — buffer | [day-32.md](day-32.md) |
+| 33 | 5 — Retrieval | Retrieval Pipeline & Golden Tests | [day-33.md](day-33.md) |
+| 34 | 6 — Context | Context Assembly + Compressor | [day-34.md](day-34.md) |
+| 35 | 6 — Context | Model Adapters | [day-35.md](day-35.md) |
+| 36 | 6 — Context | Contract Validation & Caching | [day-36.md](day-36.md) |
+| 37 | 7 — CLI/API | CLI Polish | [day-37.md](day-37.md) |
+| 38 | 7 — CLI/API | REST API + RBAC | [day-38.md](day-38.md) |
+| 39 | 7 — CLI/API | API Hardening & OpenAPI | [day-39.md](day-39.md) |
+| 40 | 7 — CLI/API | E2E Integration — buffer | [day-40.md](day-40.md) |
+| 41 | 8 — Polish | Evaluation Framework | [day-41.md](day-41.md) |
+| 42 | 8 — Polish | Docs & Example Project | [day-42.md](day-42.md) |
+| 43 | 8 — Polish | Docs Polish & Config Templates | [day-43.md](day-43.md) |
+| 44 | 9 — Hardening | Bugfix & Coverage | [day-44.md](day-44.md) |
+| 45 | 9 — Hardening | Load Test & Release Tag | [day-45.md](day-45.md) |
 
 ---
 
 ## 🏗️ Phases Summary
 
-### Phase 0: Foundation (Day 1-2)
+### Phase 0: Foundation (Day 1-3) — 45-day: +1 buffer
 Project scaffold, Knowledge Model, Config system
 
-### Phase 1: Ingestion Engine (Day 3-7)
+### Phase 1: Ingestion Engine (Day 4-10) — 45-day: +2 buffer
 Connect to Git, Confluence, Jira, Documents; detect changes; normalize
 
-### Phase 2: Code Intelligence Engine (Day 8-11)
-AST parsing, dependency analysis, call graphs, enrichment
+### Phase 2: Code Intelligence Engine (Day 11-15) — 45-day: +1 buffer
+AST parsing, dependency analysis, call graphs, enrichment (Python-first)
 
-### Phase 3: Knowledge Extraction Engine (Day 12-15)
-Rule-based + LLM extraction, decision/rule detection, validation
+### Phase 3: Knowledge Extraction Engine (Day 16-21) — 45-day: +2 buffer
+Rule-based + LLM extraction, decision/rule detection, validation + calibration
 
-### Phase 4: Knowledge Storage Engine (Day 16-19)
-Metadata, Vector, Graph stores with unified interface
+### Phase 4: Knowledge Storage Engine (Day 22-28) — 45-day: +3 buffer (outbox/reconciler)
+Metadata, Vector, Graph stores với outbox pattern, nightly check
 
-### Phase 5: Retrieval Intelligence Engine (Day 20-23)
-Intent classification, hybrid retrieval, graph traversal, reranking
+### Phase 5: Retrieval Intelligence Engine (Day 29-34) — 45-day: +2 buffer
+Intent classification, hybrid retrieval RRF, graph traversal, reranking
 
-### Phase 6: Context Delivery Engine (Day 24-26)
-Context assembly, model adapters, validation, streaming
+### Phase 6: Context Delivery Engine (Day 35-37) — 45-day: giữ nguyên
+Context assembly, model adapters (Mock-first), validation, streaming
 
-### Phase 7: CLI, API & Integration (Day 27-29)
-Full CLI, REST API, end-to-end pipeline
+### Phase 7: CLI, API & Integration (Day 38-42) — 45-day: +2 buffer
+Full CLI, REST API + RBAC, end-to-end pipeline
 
-### Phase 8: Evaluation, Docs & Polish (Day 30)
-Quality metrics, documentation, production readiness
+### Phase 8: Evaluation, Docs & Polish (Day 43-44) — 45-day: +1 buffer
+Quality metrics, documentation, example project
+
+### Phase 9: Hardening & Buffer (Day 45) — NEW in 45-day
+Bugfix, coverage >80%, load test, release tag `v0.1.0`
 
 ---
 
@@ -118,7 +137,22 @@ Use this checklist to track daily progress:
 - [ ] Day 27 — CLI Interface
 - [ ] Day 28 — REST API
 - [ ] Day 29 — End-to-End Integration
-- [ ] Day 30 — Evaluation, Docs & Polish
+- [ ] Day 30 — Evaluation, Docs & Polish (part 1)
+- [ ] Day 31 — Hybrid Retrieval (buffer)
+- [ ] Day 32 — Graph Traversal & Reranking (buffer)
+- [ ] Day 33 — Retrieval Pipeline & Golden Tests
+- [ ] Day 34 — Context Assembly + Compressor
+- [ ] Day 35 — Model Adapters
+- [ ] Day 36 — Contract Validation & Caching
+- [ ] Day 37 — CLI Polish
+- [ ] Day 38 — REST API + RBAC
+- [ ] Day 39 — API Hardening & OpenAPI
+- [ ] Day 40 — E2E Integration (buffer)
+- [ ] Day 41 — Evaluation Framework
+- [ ] Day 42 — Docs & Example Project
+- [ ] Day 43 — Docs Polish & Config Templates
+- [ ] Day 44 — Bugfix & Coverage
+- [ ] Day 45 — Load Test & Release Tag
 
 ---
 

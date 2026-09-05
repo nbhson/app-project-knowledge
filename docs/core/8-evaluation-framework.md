@@ -76,6 +76,8 @@ Measures how well the Context Delivery Engine assembles usable context.
 | **Hallucination rate** | `unsupported_claims / total_claims_in_response` | < 0.05 | Sample LLM responses, check against source |
 | **Context utilization** | `% of context tokens used by model in response` | > 0.4 | Compare input tokens to output token relevance |
 | **Adaptation accuracy** | `% of contexts correctly formatted for target model` | > 99% | Parse/adapt round-trip validation |
+| **LLM cost per run** | `prompt_tokens + completion_tokens` per extraction run | < 50k tokens/run (MVP: 0) | Track `extraction_stats` per run |
+| **Confidence calibration (ECE)** | Expected Calibration Error | < 0.1 | Reliability diagram on 100 golden samples |
 
 ---
 

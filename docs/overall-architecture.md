@@ -2,6 +2,7 @@
 
 > The complete architecture of Project Knowledge Harness (PKH): 4 Domains, 6 Engines, Knowledge Model, Cross-cutting capabilities, and Consumers.
 > [[glossary]]
+> **Scope của file này:** Big-picture — Domains, Consumers, Knowledge Model, Governance. Để xem chi tiết input/output từng Engine, đọc `docs/core/2-architecture.md` (engine-centric).
 
 ---
 
@@ -187,16 +188,25 @@ Deliver knowledge to all types of consumers.
 
 ---
 
+## MVP vs Full — Phased Delivery (Anti Over-Engineering)
+
+> Chi tiết MVP gate xem `docs/plan/plan.md#mvp-scope`. Tóm tắt:
+
+| Track | Engines | Stores | Nguồn | Đo lường |
+|-------|---------|--------|-------|----------|
+| **MVP (Day 1-7)** | 1(Git), 2(Python), 3(rule-only), 4(SQLite+Chroma+NetworkX), 5(vector-only), 6(Mock) | 3 layers | Git local | `pkh query` trả về ContextPackage có sources |
+| **Full (Day 8-30)** | Đủ 6 engines, hybrid RRF, đa nguồn | 4 layers | Git+Confluence+Jira+Docs | Đạt Success Criteria trong plan |
+
 ## 6 Execution Capabilities (Engines)
 
-| # | Engine | Domain | Input | Output |
-|---|--------|--------|-------|--------|
-| 1 | **Ingestion** | Acquisition | Source APIs, file systems, webhooks | Normalized RawItems (DISCOVERED) |
-| 2 | **Code Intelligence** | Acquisition | Source code files | CodeEntities + CodeRelationships |
-| 3 | **Knowledge Extraction** | Acquisition | RawItems + CodeEntities | KnowledgeObjects (EXTRACTED, scored) |
-| 4 | **Knowledge Storage** | Core | KnowledgeObjects | Persisted across 4 layers |
-| 5 | **Retrieval Intelligence** | Intelligence | User query | RelevantKnowledgeSet |
-| 6 | **Context Delivery** | Intelligence | RelevantKnowledgeSet | ContextPackage |
+| # | Engine | Domain | Input | Output | MVP? |
+|---|--------|--------|-------|--------|------|
+| 1 | **Ingestion** | Acquisition | Source APIs, file systems, webhooks | Normalized RawItems (DISCOVERED) | MVP: Git local only |
+| 2 | **Code Intelligence** | Acquisition | Source code files | CodeEntities + CodeRelationships | MVP: Python only |
+| 3 | **Knowledge Extraction** | Acquisition | RawItems + CodeEntities | KnowledgeObjects (EXTRACTED, scored) | MVP: rule-based only |
+| 4 | **Knowledge Storage** | Core | KnowledgeObjects | Persisted across 4 layers | MVP: 3 layers (no S3) |
+| 5 | **Retrieval Intelligence** | Intelligence | User query | RelevantKnowledgeSet | MVP: vector-only |
+| 6 | **Context Delivery** | Intelligence | RelevantKnowledgeSet | ContextPackage | MVP: MockAdapter |
 
 ---
 

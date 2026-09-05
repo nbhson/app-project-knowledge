@@ -170,36 +170,61 @@ async def delete(self, storage_key: str) -> None
 
 ---
 
-## Write Path
+## Write Path — Consistency for Polyglot Persistence
 
-When knowledge enters from Engine 3 (Extraction), it is written to ALL layers atomically:
+> **Rủi ro:** 4 stores (Metadata, Vector, Graph, Raw) không có distributed transaction. Ghi hỏng giữa chừng → vector có mà graph không → query sai.
+
+**Nguyên tắc:** Metadata Store là **source of truth** duy nhất. Vector/Graph/Raw là **derived** và có thể rebuild từ Metadata.
+
+### Transactional Outbox Pattern (Bắt buộc)
+
+When knowledge enters from Engine 3 (Extraction), it is written via outbox, không ghi song song 4 stores trong một try:
 
 ```python
 class KnowledgeWriter:
-    """Writes knowledge to all storage layers in a transaction."""
+    """Outbox pattern — Metadata là truth, các store khác là eventual consistent."""
     
     async def write(self, knowledge: list[KnowledgeObject]) -> WriteResult:
-        try:
-            # 1. Write to Metadata Store (primary)
-            ids = await self.metadata_store.insert_many(knowledge)
-            
-            # 2. Write to Vector Store
-            embeddings = await self._embed(knowledge)
-            await self.vector_store.upsert(ids, embeddings, knowledge)
-            
-            # 3. Write to Graph Store
-            nodes, edges = await self._extract_graph(knowledge)
-            await self.graph_store.upsert(nodes, edges)
-            
-            # 4. Write to Raw Sources
-            await self.raw_store.store_batch(knowledge)
-            
-            return WriteResult(success=True, ids=ids)
-        except Exception as e:
-            # Rollback all writes
-            await self._rollback(ids)
-            return WriteResult(success=False, error=str(e))
+        # 1. Atomic: Metadata + outbox trong cùng DB transaction (SQLite/PostgreSQL)
+        async with self.metadata_store.transaction() as tx:
+            ids = await tx.insert_many(knowledge)
+            await tx.insert_outbox(ids, op="UPSERT")  # bảng outbox: id, op, payload, status=PENDING
+            # commit atomically — nếu fail ở đây, chưa có gì ghi ra ngoài
+
+        # 2. Best-effort fan-out từ outbox (idempotent, retryable)
+        #    Worker đọc outbox PENDING và đẩy sang Vector/Graph/Raw với idempotency_key = knowledge.id
+        await self._fanout_from_outbox()  # retry 3 lần, exponential backoff
+
+        return WriteResult(success=True, ids=ids, pending_outbox=len(ids))
+
+    async def _fanout_from_outbox(self):
+        for entry in await self.metadata_store.claim_outbox(batch=100):
+            try:
+                ko = await self.metadata_store.get(entry.id)
+                # Idempotent upsert — ghi lại nhiều lần cho kết quả giống nhau
+                await self.vector_store.upsert(ko, idempotency_key=ko.id)
+                await self.graph_store.upsert(ko, idempotency_key=ko.id)
+                await self.raw_store.store(ko, idempotency_key=ko.id)
+                await self.metadata_store.mark_outbox_done(entry.id)
+            except Exception as e:
+                await self.metadata_store.mark_outbox_failed(entry.id, str(e))
+                # sẽ được Reconciler retry
 ```
+
+**Idempotency:** Mọi `upsert/delete` phải chấp nhận `idempotency_key` và là no-op nếu đã tồn tại cùng `content_hash`.
+
+### Reconciliation & Repair (Bắt buộc cho Prod)
+
+| Cơ chế | Tần suất | Việc làm |
+|--------|----------|----------|
+| **Outbox Reconciler** | Mỗi 1 phút | Retry các entry `FAILED` hoặc `PENDING >5m`, max 5 lần rồi alert |
+| **Nightly Consistency Check** | Mỗi đêm | So sánh `count(metadata ACTIVE) vs count(vector) vs count(graph nodes)`; nếu lệch >1% → rebuild derived stores từ Metadata |
+| **Read-time fallback** | Mỗi query | Nếu Vector/Graph timeout hoặc lệch, fallback về Metadata-only (vector-only) và log warning — không fail query |
+
+### MVP Simplification
+
+- **MVP (SQLite dev):** Chỉ cần Metadata + Vector + Graph trong cùng process, có thể dùng sequential writes + manual rollback (vì không có concurrent writer). Outbox có thể là bảng `outbox` trong SQLite như trên nhưng chạy inline thay vì background worker.
+- **Prod (PostgreSQL+pgvector+Neo4j+S3):** Bắt buộc outbox worker riêng + nightly check.
 
 ---
 
@@ -219,8 +244,9 @@ Retrieval queries may read from one or more layers depending on the strategy:
 
 ## Key Design Decisions
 
-1. **Write once, read many**: All layers are written in a single transactional batch.
-2. **Source of truth preserved**: Raw sources are never modified; they are append-only.
-3. **Eventual consistency**: Cross-layer consistency is achieved at write time; reads may see slightly stale data.
-4. **Separate concerns**: Each layer is independently replaceable (swap pgvector for Weaviate without changing other layers).
-5. **Index by lifecycle state**: Metadata Store indexes by lifecycle_state for efficient filtering during retrieval.
+1. **Metadata is truth, others are derived**: Vector/Graph/Raw có thể rebuild hoàn toàn từ Metadata — không bao giờ dùng vector làm truth.
+2. **Outbox atomicity**: Chỉ Metadata+outbox là atomic; fan-out là eventual consistent với idempotency.
+3. **Source of truth preserved**: Raw sources là append-only, không sửa.
+4. **Separate concerns**: Mỗi layer thay thế được (swap pgvector ↔ Weaviate) nhưng phải implement `idempotency_key`.
+5. **Index by lifecycle_state**: Metadata index `lifecycle_state` để retrieval filter nhanh; Vector/Graph cũng lưu lifecycle để filter sớm.
+6. **Fail-open read**: Query không fail nếu 1 derived store chết — fallback Metadata-only và ghi `warnings` vào ContextPackage.

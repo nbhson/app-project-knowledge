@@ -229,6 +229,12 @@ Engine 5 → Engine 6 (Context Delivery)
 | **mlflow** | LLM experiment tracking and model management | Planned |
 | **OpenTelemetry** | Distributed tracing and metrics | Planned |
 
+### LLM Cost Control
+
+- **Default is rule-based** (`llm_enabled=false`). LLM chỉ bật khi rule không đủ — xem `docs/engines/knowledge-extraction-engine.md#cost-control`.
+- **Adapter + Mock first:** Mọi test dùng `MockAdapter`; không test nào gọi API thật trong CI.
+- **Budget guard & caching:** Batch 10-20 items/prompt, cache `hash(content)`, hard budget `50k tokens/run`.
+
 ### Technology Avoidance
 
 PKH intentionally avoids certain technologies to maintain simplicity and focus:
@@ -237,6 +243,7 @@ PKH intentionally avoids certain technologies to maintain simplicity and focus:
 - **Heavyweight ORMs**: Use SQLAlchemy Core or raw SQL for performance-critical paths
 - **Proprietary Cloud Services**: Design for portability across clouds and on-premises
 - **Monolithic Frameworks**: Prefer composable, lightweight libraries
+- **LLM-for-everything**: Không dùng LLM cho việc rule-based làm được (AST parsing, Jira field mapping)
 
 ## Getting Started with the Technology Stack
 

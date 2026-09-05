@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Project Knowledge Harness (PKH)** — A continuously evolving, connected, model-independent knowledge system for software projects. Transforms fragmented project information (Git, Confluence, Jira, Documents) into structured, traceable knowledge with full lifecycle management.
 
+> ⚠️ **Design-spec only — no `src/` yet.** All `pkh ingest/query` commands in docs are specs for Phase 0–7. Do not claim a phase is done without `pytest` logs. See `docs/plan/plan.md#current-status` and `docs/decisions/`.
+
 ## Key Commands
 
 ```bash
@@ -37,7 +39,7 @@ pkh audit                         # View audit log
 uvicorn src.pkh.api.main:app --reload
 
 # Generate daily plan files (for development planning)
-# See docs/plan/daily/ for 30-day implementation plan
+# See docs/plan/daily/ for 45-day implementation plan (was 30)
 ```
 
 ## Architecture
@@ -115,8 +117,8 @@ src/pkh/
 
 | File | Purpose |
 |------|---------|
-| `docs/plan/plan.md` | Master 30-day implementation plan |
-| `docs/plan/daily/` | Day-by-day targets (30 files) |
+| `docs/plan/plan.md` | Master 45-day implementation plan |
+| `docs/plan/daily/` | Day-by-day targets (45 files) |
 | `config/settings.yaml.example` | Full configuration template |
 | `src/pkh/models/knowledge.py` | Core Pydantic models |
 | `src/pkh/models/lifecycle.py` | State machine with transition validation |
@@ -156,19 +158,26 @@ pytest tests/ --cov=src/pkh --cov-report=term-missing
 ## Development Notes
 
 - **Python 3.10+**, Pydantic v2, SQLAlchemy 2.0
-- **tree-sitter** for AST parsing (language-agnostic)
-- **Async-first**: Use `asyncio` for I/O (connectors, API, LLM calls)
-- **Config via Pydantic Settings**: YAML file + `PKH_` env var overrides
-- **Structured logging**: JSON output with correlation IDs
-- **Error hierarchy**: `PKHError` base with specific subclasses
+- **tree-sitter Python-first MVP** — `tree-sitter-python` Day 8, other languages are plugin post-MVP (`docs/decisions/adr-003-code-parsing.md`)
+- **Polyglot persistence:** Metadata (SQLite/Postgres) is the source of truth; Vector/Graph/Raw are derived and rebuildable via outbox (`docs/engines/knowledge-storage-engine.md`, `adr-002`)
+- **LLM off by default:** `extraction.llm_enabled=false`, batching + cache + budget 50k tokens/run, `MockAdapter` for all tests (`adr-004`)
+- **MVP first:** Day 1–7 = Git + Python + rule-only + SQLite/Chroma/NetworkX + vector-only + Mock — do not touch Confluence/Jira/Neo4j/pgvector until MVP passes
+- **Async-first:** Use `asyncio` for I/O (connectors, API, LLM calls)
+- **Config via Pydantic Settings:** YAML file + `PKH_` env var overrides
+- **Structured logging:** JSON output with correlation IDs
+- **Error hierarchy:** `PKHError` base with specific subclasses
+- **Verification:** Phase done = `pytest` + `ruff` + `mypy` pass — not just docs
 
 ## Key Reference Docs
 
 - `docs/core/1-vision-and-design-principles.md` — Vision
+- `docs/core/2-architecture.md` — System architecture
 - `docs/core/3-knowledge-model.md` — Entity/relationship types
-- `docs/core/4-knowledge-lifecycle.md` — State transitions
+- `docs/core/4-knowledge-lifecycle.md` — State transitions & rules
 - `docs/core/5-source-of-truth-model.md` — Source hierarchy
 - `docs/core/6-retrieval-strategy.md` — Retrieval strategies per intent
 - `docs/core/7-context-contract.md` — ContextPackage schema
 - `docs/core/8-evaluation-framework.md` — Quality metrics
 - `docs/core/9-governance-and-trust-model.md` — RBAC/audit
+- `docs/decisions/` — Architecture Decision Records (ADRs)
+- `docs/glossary.md` — Term definitions

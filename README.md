@@ -2,6 +2,8 @@
 
 > Transform fragmented project information into a continuously evolving, connected, model-independent knowledge system.
 
+> ⚠️ **Status: Design-spec only (no `src/` yet).** Architecture & **45-day** plan are documented and reviewed; implementation is pending. See `docs/plan/plan.md#current-status` for verification gates.
+
 ## Architecture
 
 ```mermaid
@@ -76,21 +78,14 @@ Comparison with Alternative Solutions
 
 ## Conclusion
 
-PKH is among the most complete and well-designed project knowledge systems available. It succeeds in:
+PKH design is among the most complete and well-structured proposals for a project knowledge system. It succeeds on paper in:
 
 - **Solving the right problem**: Fragmented project information is a real and significant challenge in software development
 - **Applying sound design principles**: Knowledge First, Source Traceability, Confidence Scoring, and Model Independence
-- **Providing concrete, measurable solutions**: Entities, relationships, lifecycle states, and a clear evaluation framework
-- **Balancing idealism with practicality**: From concrete examples (ADR lifecycle, PaymentService) to real CLI commands and YAML configuration
+- **Providing concrete, measurable specs**: Entities, relationships, lifecycle states, and a clear evaluation framework
+- **Balancing idealism with practicality**: From concrete examples (ADR lifecycle, PaymentService) to spec CLI commands and YAML configuration
 
----
-
-## Design Principles
-
-1. **Knowledge First** — Model is replaceable, knowledge is permanent
-2. **Source Traceability** — Every knowledge answers "where did this come from?"
-3. **Never Trust Extracted Knowledge Completely** — Confidence scores always attached
-4. **Model Independence** — Any LLM can be swapped without changing knowledge core
+> **Note:** Conclusion is about *design quality*, not production readiness. Validation requires implementation per `docs/plan/plan.md`.
 
 ## Entity & Relationship Types
 
@@ -102,8 +97,8 @@ PKH is among the most complete and well-designed project knowledge systems avail
 
 | Document | Description |
 |----------|-------------|
-| `docs/plan/plan.md` | Master 30-day implementation plan |
-| `docs/plan/daily/` | Day-by-day implementation targets (30 files) |
+| `docs/plan/plan.md` | Master 45-day implementation plan (was 30) |
+| `docs/plan/daily/` | Day-by-day implementation targets (45 files) |
 | `docs/core/1-vision-and-design-principles.md` | Vision & design principles |
 | `docs/core/3-knowledge-model.md` | Entity/relationship types |
 | `docs/core/4-knowledge-lifecycle.md` | State transitions & rules |

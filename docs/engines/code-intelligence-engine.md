@@ -46,17 +46,32 @@ CodeKnowledgeOutput -> feeds into Engine 3 (Extraction)
 
 ---
 
-## Supported Languages
+## Language Support — Incremental (Anti Complexity)
+
+> **Rủi ro:** Mỗi parser có AST khác nhau, mapping về `EntityType` phức tạp, làm chậm MVP.
+
+| Phase | Languages | Parser | AST Nodes | Gate |
+|-------|-----------|--------|-----------|------|
+| **MVP (Day 8)** | **Python only** | `tree-sitter-python` | Class, Function, Method, Import, Decorator | `pytest tests/unit/test_code_parser_python.py` pass trên 1 repo Python sample |
+| **Phase 2 (Day 11+)** | + TypeScript/JavaScript | `tree-sitter-typescript` | + Interface, TypeAlias | Thêm sau khi Python ổn |
+| **Phase 3 (Later)** | + Java, Go, Rust, C/C++ | respective `tree-sitter-*` | Struct, etc. | Mỗi ngôn ngữ là plugin riêng, thêm khi có nhu cầu thực tế — không block MVP |
+
+**Quy tắc:**
+- `CodeParser` là interface chung (`parse(file_path) -> list[CodeEntity]`). Mỗi ngôn ngữ là adapter riêng trong `src/pkh/engines/code_intelligence/parsers/`.
+- Nếu parser fail (syntax error), fallback về **text-based extraction** (regex class/function) và ghi `confidence=0.5, warnings` — không fail cả file.
+- Không hỗ trợ ngôn ngữ mới cho đến khi `benchmark: <1min cho 10k lines Python` đạt.
+
+## Supported Languages (Full Scope — Post-MVP)
 
 | Language | Parser | AST Nodes Extracted | Notes |
 |----------|--------|---------------------|-------|
-| Python | `tree-sitter-python` | Class, Function, Method, Import, Decorator | Full support |
-| TypeScript | `tree-sitter-typescript` | Class, Function, Method, Interface, TypeAlias, Import | Full support |
-| JavaScript | `tree-sitter-javascript` | Class, Function, Method, Import, Export | Full support |
-| Go | `tree-sitter-go` | Struct, Function, Method, Import | Full support |
-| Rust | `tree-sitter-rust` | Struct, Function, Method, Impl, Import | Full support |
-| Java | `tree-sitter-java` | Class, Interface, Method, Import | Full support |
-| C/C++ | `tree-sitter-c` / `tree-sitter-cpp` | Struct, Function, Method, Include | Basic support |
+| Python | `tree-sitter-python` | Class, Function, Method, Import, Decorator | MVP — Full support |
+| TypeScript | `tree-sitter-typescript` | Class, Function, Method, Interface, TypeAlias, Import | Post-MVP |
+| JavaScript | `tree-sitter-javascript` | Class, Function, Method, Import, Export | Post-MVP |
+| Go | `tree-sitter-go` | Struct, Function, Method, Import | Later |
+| Rust | `tree-sitter-rust` | Struct, Function, Method, Impl, Import | Later |
+| Java | `tree-sitter-java` | Class, Interface, Method, Import | Later |
+| C/C++ | `tree-sitter-c` / `tree-sitter-cpp` | Struct, Function, Method, Include | Later — Basic support |
 
 ---
 

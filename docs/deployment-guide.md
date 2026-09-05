@@ -7,11 +7,13 @@
 
 ## Development Deployment
 
+> ⚠️ **Spec until `src/` exists.** Các lệnh `pkh ingest/query` dưới đây là spec cho Phase 0-1; chạy thực tế yêu cầu `pyproject.toml` + `src/pkh/` đã implement. Xem `docs/plan/plan.md#mvp-scope` cho MVP 7 ngày (Git local + SQLite/Chroma/NetworkX, không cần Docker).
+
 ### Prerequisites
 
 - Python 3.10+
 - Git
-- Optional: Docker (for database services)
+- Optional: Docker (for database services — chỉ cần cho prod Neo4j/pgvector, MVP không cần)
 
 ### Quick Start
 
@@ -119,7 +121,9 @@ pkh ingest --source git://https://github.com/org/project
         └───────────┘ └────────┘ └──────────┘
 ```
 
-### Prerequisites
+### Prerequisites (Full — Post-MVP)
+
+> MVP chỉ cần **SQLite + Chroma + NetworkX + Local FS** (không cần Postgres/Neo4j/S3/Redis). Các infra dưới là cho Full prod sau Day 19.
 
 - PostgreSQL 16+ with pgvector extension
 - Neo4j 5+ (or compatible graph database)

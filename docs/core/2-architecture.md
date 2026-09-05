@@ -1,6 +1,7 @@
 # Architecture -- Engines as Execution Capabilities
 
 > [[glossary]]
+> **Scope của file này:** Chi tiết 6 Engines như *execution capabilities* (input/output/capabilities). Để xem toàn cảnh 4 Domains + Consumers + Governance, đọc `docs/overall-architecture.md` (system overview). Hai file bổ sung nhau, không trùng — file này deep-dive, file kia big-picture.
 
 ## System Structure
 
