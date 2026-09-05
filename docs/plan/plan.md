@@ -2,13 +2,6 @@
 
 > **Vision:** Transform fragmented project information into a continuously evolving, connected, model-independent knowledge system.
 > **Core tenet:** Knowledge is the long-term asset. Model is a replaceable consumer.
-> 
-> **Quick Stats:**
-> - Investment: $7,000 (30 days + infrastructure)
-> - Return: $150,000/year (50 developers × 2 weeks faster onboarding)
-> - ROI: 2,000% (21x return)
-> - Breakeven: Day 15
-> - User Impact: New developers productive by Day 2 (vs Week 3)
 
 ---
 
@@ -38,77 +31,56 @@ graph TD
 
 ### Goal
 
-Set up project structure, Knowledge Model, and core types. Have working Python project with validated models.
+Set up project structure, Knowledge Model, and core types.
 
-### Day 1 — Project Setup + Models
+### Day 1 — Project Scaffolding
 
-**Commands:**
-```bash
-mkdir -p project-knowledge-harness
-cd project-knowledge-harness
-python -m venv venv
-source venv/bin/activate
-pip install fastapi uvicorn pydantic sqlalchemy
+- [ ] Initialize Python project with pyproject.toml, requirements.txt
+- [ ] Create package structure: `src/pkh/` with:
+  ```
+  pkh/
+  ├── __init__.py
+  ├── models/           # KnowledgeObject, SourceReference, enums
+  ├── config/           # YAML config parsing
+  ├── engines/          # Engine 1-6 implementations
+  │   ├── ingestion/
+  │   ├── code_intelligence/
+  │   ├── extraction/
+  │   ├── storage/
+  │   ├── retrieval/
+  │   └── context_delivery/
+  ├── adapters/         # LLM adapters (OpenAI, Claude, etc.)
+  ├── storage/          # Vector, Graph, Metadata backends
+  ├── cli/              # Typer CLI commands
+  └── utils/            # Logging, error handling, helpers
+  ```
+- [ ] Set up testing framework (pytest)
+- [ ] Define core Pydantic models:
+  - `LifecycleState` enum: DISCOVERED, EXTRACTED, VALIDATING, ACTIVE, UPDATED, SUPERSEDED, DEPRECATED, ARCHIVED
+  - `ObjectType` enum: ENTITY, RELATIONSHIP, DECISION, RULE
+  - `EntityType` enum: 23 types (REPOSITORY, MODULE, PACKAGE, FILE, CLASS, INTERFACE, FUNCTION, METHOD, ENUM, TYPE, VARIABLE, EPIC, STORY, TASK, BUG, REQUIREMENT, ADR, DOCUMENT, API_SPEC, ENDPOINT, etc.)
+  - `RelationshipType` enum: 15 types (IMPLEMENTS, DEPENDS_ON, CALLS, USES, OWNS, DOCUMENTS, REQUIRES, SUPERSEDES, RELATED_TO, AFFECTS, PART_OF, TRACES_TO, CONTAINS, EXTENDS, IMPLEMENTS_IFACE)
+  - `SourceType` enum: GIT, CONFLUENCE, JIRA, DOCUMENT, API_SPEC
+- [ ] Set up logging infrastructure (structured logging with JSON output)
 
-mkdir -p src/pkh/{models,engines,api,storage}
-mkdir -p tests data
-```
+### Day 2 — Knowledge Model and Config
 
-**Tasks:**
-- [ ] Initialize Python project (venv, pip install pydantic sqlalchemy)
-- [ ] Create package structure in `src/pkh/`
-- [ ] Define all enums (LifecycleState, ObjectType, EntityType, RelationshipType, SourceType)
-- [ ] Define SourceReference Pydantic model
-- [ ] Set up pytest for testing
-- [ ] Create src/pkh/models/__init__.py (export models)
+- [ ] Implement `KnowledgeObject` Pydantic model with full validation:
+  - id (UUID v4), object_type, title, description, content, source_references (required, non-empty), confidence (0.0-1.0), lifecycle_state, created_at, updated_at, tags, properties
+- [ ] Implement `SourceReference` model with source-specific fields:
+  - source_type, source_id, url, title, last_synced, extra (dict with type-specific keys)
+- [ ] Implement lifecycle state machine with transition validation:
+  - 14 valid transitions defined in `core/4-knowledge-lifecycle.md`
+- [ ] Implement Config class with YAML parsing:
+  - sources config (git, confluence, jira, documents)
+  - storage config (vector, graph, metadata providers)
+  - retrieval config (strategies, fusion weights)
+  - adapters config (model selection)
+  - governance config (RBAC settings)
+- [ ] Write unit tests for model validation
+- [ ] Setup error handling infrastructure with custom exception hierarchy
 
-**Pydantic Models to Create:**
-```python
-# src/pkh/models/knowledge.py
-from pydantic import BaseModel
-from uuid import UUID
-from datetime import datetime
-from typing import List, Any
-
-class SourceReference(BaseModel):
-    source_type: str  # GIT, CONFLUENCE, JIRA, DOCUMENT, API_SPEC
-    source_id: str
-    url: str
-    title: str
-    last_synced: datetime
-
-class KnowledgeObject(BaseModel):
-    id: UUID
-    object_type: str  # CLASS, FUNCTION, REQUIREMENT, etc.
-    title: str
-    content: str
-    source_references: List[SourceReference]  # MUST be non-empty
-    confidence: float  # 0.0-1.0
-    lifecycle_state: str  # DISCOVERED, EXTRACTED, ACTIVE, etc.
-    created_at: datetime
-    updated_at: datetime
-    tags: List[str] = []
-```
-
-**Deliverable:** Working Python project with validated Pydantic models ✓
-
-### Day 2 — Lifecycle + Config
-
-**Tasks:**
-- [ ] Implement lifecycle state machine (8 states, 14 valid transitions)
-- [ ] Create Config class for YAML parsing
-- [ ] Add logging infrastructure (structured JSON logs)
-- [ ] Write unit tests for models
-- [ ] Setup error handling with custom exceptions
-
-**Lifecycle States (8 total):**
-```
-DISCOVERED → EXTRACTED → VALIDATING → ACTIVE ↔ UPDATED
-                                        ↓
-                                    SUPERSEDED → DEPRECATED → ARCHIVED
-```
-
-**Deliverable:** Models + lifecycle + config system all tested ✓
+**Deliverable:** Project scaffold with typed knowledge model, config system, test framework
 
 ---
 
@@ -119,179 +91,47 @@ DISCOVERED → EXTRACTED → VALIDATING → ACTIVE ↔ UPDATED
 
 ### Goal
 
-Build Engine 1: Clone/fetch from Git, Confluence, Jira; normalize into KnowledgeObjects.
+Build Engine 1: Connect to Git, Confluence, Jira; detect changes; normalize raw data into KnowledgeObject s.
 
 ### Day 3 — Git Connector
 
-**Tasks:**
-- [ ] Implement GitSourceConnector (clone/pull, list files, track changes)
-- [ ] Implement FileWatcher (detect changes via git log)
-- [ ] Normalize git data → KnowledgeObject
+- [ ] Implement GitSourceConnector -- clone/pull repo, list files, track changes via git log
+- [ ] Implement FileWatcher -- detect new/modified/deleted files since last sync
+- [ ] Normalize git data -> KnowledgeObject (Repository, Module, File entities)
+- [ ] Add auth: SSH key, token, username/password
 
-**Code Template:**
-```python
-# src/pkh/engines/ingestion/git_connector.py
-import subprocess
-from pathlib import Path
+### Day 4 — Confluence Connector
 
-class GitConnector:
-    def __init__(self, repo_url: str, branch: str = "main"):
-        self.repo_url = repo_url
-        self.branch = branch
-        self.local_path = Path(f"./data/repos/{repo_url.split('/')[-1]}")
-    
-    def clone_or_update(self):
-        if self.local_path.exists():
-            subprocess.run(["git", "-C", str(self.local_path), "pull"])
-        else:
-            self.local_path.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["git", "clone", self.repo_url, str(self.local_path)])
-    
-    def list_files(self):
-        extensions = {'.py', '.ts', '.js', '.java', '.go', '.rs'}
-        files = []
-        for file in self.local_path.rglob('*'):
-            if file.is_file() and file.suffix in extensions:
-                files.append(str(file))
-        return files
-```
+- [ ] Implement ConfluenceSourceConnector -- fetch pages by space, recurse children
+- [ ] Parse Confluence storage format -> markdown/text
+- [ ] Detect ADRs, design docs, specs by content patterns
+- [ ] Normalize -> KnowledgeObject (Document, ArchitectureDecision, Requirement entities)
+- [ ] Track page version history for change detection
 
-**Deliverable:** Git connector working, can clone/list files ✓
+### Day 5 — Jira Connector
 
-### Day 4 — SQLite Storage
+- [ ] Implement JiraSourceConnector -- fetch issues by project key, filter by type
+- [ ] Parse issue fields: title, description, acceptance criteria, comments, transitions
+- [ ] Build requirement graph: Epic -> Story -> Task -> Sub-task
+- [ ] Normalize -> KnowledgeObject (Epic, Story, Task, Bug, Requirement entities)
+- [ ] Track status changes for lifecycle updates
 
-**Tasks:**
-- [ ] Implement MetadataStore (SQLAlchemy + SQLite)
-- [ ] Create DB schema (knowledge_objects table)
-- [ ] Implement CRUD operations
-- [ ] Write tests
+### Day 6 — Document Connector and Change Detection
 
-**Code Template:**
-```python
-# src/pkh/storage/metadata_store.py
-from sqlalchemy import create_engine, Column, String, Float, DateTime
-from sqlalchemy.orm import declarative_base, Session
-from datetime import datetime
-import uuid
+- [ ] Implement DocumentSourceConnector -- local filesystem + URL-based docs
+- [ ] Support: Markdown, PDF (text extraction), OpenAPI specs, DB schema files
+- [ ] Implement SyncManager -- orchestrates all connectors with incremental sync
+- [ ] Implement ChangeDetector -- diff-based: what changed since last ingestion
+- [ ] Webhook listener for real-time updates (Git push, Confluence edit, Jira transition)
 
-Base = declarative_base()
+### Day 7 — Ingestion CLI and Integration Tests
 
-class KnowledgeRecord(Base):
-    __tablename__ = "knowledge_objects"
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    object_type = Column(String)
-    title = Column(String)
-    content = Column(String)
-    confidence = Column(Float)
-    lifecycle_state = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+- [ ] CLI: pkh ingest --source git://path --source confluence://SPACE --source jira://PROJECT
+- [ ] CLI: pkh ingest --sync (incremental)
+- [ ] Write integration tests for each connector (mocked API calls)
+- [ ] Add progress tracking + logging
 
-class MetadataStore:
-    def __init__(self, db_path: str = "data/metadata.db"):
-        self.engine = create_engine(f"sqlite:///{db_path}")
-        Base.metadata.create_all(self.engine)
-    
-    def save(self, obj: dict):
-        with Session(self.engine) as session:
-            record = KnowledgeRecord(**obj)
-            session.add(record)
-            session.commit()
-```
-
-**Deliverable:** SQLite storage working, can save/load knowledge ✓
-
-### Day 5 — Simple Retrieval + FastAPI
-
-**Tasks:**
-- [ ] Implement SimpleRetriever (keyword search)
-- [ ] Implement ContextAssembler
-- [ ] Create FastAPI /chat endpoint
-- [ ] Create simple HTML UI
-
-**Code Template:**
-```python
-# src/pkh/api/main.py
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-app = FastAPI(title="PKH")
-
-class ChatRequest(BaseModel):
-    query: str
-
-class ChatResponse(BaseModel):
-    answer: str
-    confidence: float
-    sources: list
-
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    # Retrieve knowledge from DB
-    # Build context
-    # Call LLM (Claude/GPT)
-    return ChatResponse(
-        answer="Answer based on retrieved knowledge",
-        confidence=0.85,
-        sources=[]
-    )
-```
-
-**Deliverable:** FastAPI working, /chat endpoint functional ✓
-
-### Day 6 — Web UI + E2E Test
-
-**Tasks:**
-- [ ] Create simple HTML/JS frontend (no React initially)
-- [ ] Connect to /chat endpoint
-- [ ] Test end-to-end: Input URL → Ingest → Query → Answer
-- [ ] Add basic error handling
-
-**HTML Template:**
-```html
-<!DOCTYPE html>
-<html>
-<body>
-    <h1>PKH Chat</h1>
-    <input type="text" id="query" placeholder="Ask about your project...">
-    <button onclick="askQuestion()">Ask</button>
-    <div id="result"></div>
-    
-    <script>
-        async function askQuestion() {
-            const query = document.getElementById('query').value;
-            const res = await fetch('http://localhost:8000/chat', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({query})
-            });
-            const data = await res.json();
-            document.getElementById('result').innerHTML = data.answer;
-        }
-    </script>
-</body>
-</html>
-```
-
-**Deliverable:** Working MVP with web UI ✓
-
-### Day 7 — Polish + Test
-
-**Tasks:**
-- [ ] Run E2E test: ingest → query → answer
-- [ ] Add error handling
-- [ ] Test with sample GitHub repo
-- [ ] Document setup steps
-
-**Test Flow:**
-```
-1. Enter: https://github.com/torvalds/linux
-2. Wait 5 minutes (Engine 1-4 process)
-3. Ask: "What is this project?"
-4. Get: Answer + sources + confidence
-```
-
-**Deliverable:** Working MVP ready for use ✓
+**Deliverable:** Engine 1 fully functional, 3 connectors working, CLI command pkh ingest
 
 ---
 
