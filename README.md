@@ -6,19 +6,38 @@
 
 ```mermaid
 graph TD
-    A[DATA SOURCES<br/>Git Repo \| Confluence \| Jira \| Documents \| API Specs] --> B[① INGESTION ENGINE]
+    A["DATA SOURCES<br/>Git Repo · Confluence · Jira · Documents · API Specs"]
 
-    B --> C{Code or Docs?}
-    C -->|Code| D[② CODE INTELLIGENCE ENGINE<br/>tree-sitter \| AST \| Symbols \| Call graphs]
-    C -->|Docs| E[③ KNOWLEDGE EXTRACTION ENGINE<br/>Hybrid: Rule-based + LLM-assisted]
+    A --> B["① INGESTION ENGINE"]
 
-    D --> E
-    E --> F[④ KNOWLEDGE STORAGE ENGINE<br/>Vector Store \| Graph Store \| Metadata Store \| Raw Sources]
+    B --> C{"Source Type?"}
 
-    F --> G[⑤ RETRIEVAL INTELLIGENCE ENGINE<br/>Intent → Plan → Hybrid Retrieve → Rerank → Dedup]
-    G --> H[⑥ CONTEXT DELIVERY ENGINE<br/>ContextPackage \| 5-tier compression \| Model adapters]
+    C -->|Code| D["② CODE INTELLIGENCE ENGINE<br/>tree-sitter · AST · Symbols · Call Graphs"]
 
-    H --> I[CONSUMERS<br/>CLI \| REST API \| IDE \| Agent SDK]
+    C -->|Docs| E["③ KNOWLEDGE EXTRACTION ENGINE<br/>Rule-based · LLM-assisted · Entity Extraction"]
+
+    D --> F["④ KNOWLEDGE STORAGE ENGINE"]
+    E --> F
+
+    F --> G["Vector Store"]
+    F --> H["Graph Store"]
+    F --> I["Metadata Store"]
+    F --> J["Raw Source Store"]
+
+    G --> K["⑤ RETRIEVAL INTELLIGENCE ENGINE"]
+    H --> K
+    I --> K
+    J --> K
+
+    K --> L["Intent Understanding"]
+    L --> M["Retrieval Planning"]
+    M --> N["Hybrid Retrieval"]
+    N --> O["Reranking"]
+    O --> P["Deduplication"]
+
+    P --> Q["⑥ CONTEXT DELIVERY ENGINE<br/>Context Package · 5-tier Compression · Model Adapters"]
+
+    Q --> R["CONSUMERS<br/>CLI · REST API · IDE · Agent SDK"]
 ```
 
 ## Design Principles
