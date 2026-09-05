@@ -3,6 +3,8 @@
 > **Vision:** Transform fragmented project information into a continuously evolving, connected, model-independent knowledge system.
 > **Core tenet:** Knowledge is the long-term asset. Model is a replaceable consumer.
 
+> 📅 **For daily targets and tasks, see [`docs/plan/daily/`](daily/README.md)** — 30 day-by-day files with clear targets to move to the next day.
+
 ---
 
 ## Current Status
