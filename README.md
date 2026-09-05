@@ -306,28 +306,28 @@ class SourceReference(BaseModel):
 
 ## Comparison with Alternatives
 
-SO SÁNH VỚI CÁC PHƯƠNG ÁN THAY THẾ
+Comparison with Alternative Solutions
 
-| Tiêu chí | PKH | Công cụ wiki truyền thống (Confluence, Notion) | Công cụ tìm kiếm mã (Sourcegraph, GitHub Code Search) | Hệ thống RAG tổng quát |
-|----------|-----|-----------------------------------------------|------------------------------------------------------|----------------------|
-| **Cấu trúc kiến trúc** | ✅ Đối tượng có cấu trúc + mối quan hệ | ❌ Văn bản tự do, ít cấu trúc | ❌ Chỉ mã, không có mối quan hệ sémantics | ⚠️ Phụ thuộc vào chunking, thiếu ontology |
-| **Nguồn gốc truy vết** | ✅ SourceReference bắt buộc | ❌ Thường thiếu hoặc thủ công | ✅ Liên kết trực tiếp tới mã | ⚠️ Thường thiếu, phụ thuộc vào metadata |
-| **Điểm số độ tin cậy** | ✅ 0.0-1.0 cho mọi kiến thức trích xuất | ❌ Không có | ❌ Không áp dụng (mã là nguồn thật) | ⚠️ Có đôi khi nhưng không nhất quán |
-| **Chu kỳ đời sống** | ✅ Đầy đủ (7 trạng thái, quy chuyển đổi) | ❌ Tĩnh | ❌ Không áp dụng | ❌ Thường thiếu |
-| **Độc lập mô hình** | ✅ ContextPackage + Adapter | ❌ Thường gắn với UI cụ thể | ✅ API độc lập | ⚠️ Thụ động phụ thuộc qua prompt |
-| **Phạm vi kiến thức** | ✅ Toàn bộ (mã, dự án, tài liệu, hệ thống) | ❌ Chủ yếu tài liệu | ❌ Chỉ mã | ⚠️ Phụ thuộc vào nguồn dữ liệu đầu vào |
-| **Chất lượng đo lường** | ✅ Framework toàn diện | ❌ Hạn chế | ⚠️ Một số metrics | ⚠️ Phụ thuộc vào triển khai cụ thể |
+| Criterion | PKH | Traditional Wiki Tools (Confluence, Notion) | Code Search Tools (Sourcegraph, GitHub Code Search) | General RAG Systems |
+|----------|-----|---------------------------------------------|----------------------------------------------------|---------------------|
+| **Structured Architecture** | ✅ Structured objects + relationships | ❌ Free-form text, minimal structure | ❌ Code only, no semantic relationships | ⚠️ Depends on chunking, lacks ontology |
+| **Source Traceability** | ✅ SourceReference mandatory | ❌ Often missing or manual | ✅ Direct links to source code | ⚠️ Often missing, depends on metadata |
+| **Confidence Scoring** | ✅ 0.0-1.0 for all extracted knowledge | ❌ None | ❌ N/A (code is authoritative source) | ⚠️ Sometimes present, inconsistent |
+| **Knowledge Lifecycle** | ✅ Full lifecycle (7 states, transition rules) | ❌ Static | ❌ N/A | ❌ Often missing |
+| **Model Independence** | ✅ ContextPackage + Adapter | ❌ Tied to specific UI | ✅ Independent API | ⚠️ Prompt-dependent |
+| **Knowledge Scope** | ✅ Comprehensive (code, projects, docs, systems) | ❌ Primarily documents | ❌ Code only | ⚠️ Depends on input data sources |
+| **Quality Measurement** | ✅ Comprehensive framework | ❌ Limited (usage metrics only) | ⚠️ Some metrics (hit rate, latency) | ⚠️ Implementation-dependent |
 
 ---
 
-## Kết luận
+## Conclusion
 
-PKH là một trong những thiết kế kiến thức dự án tốt nhất và hoàn chỉnh nhất trong tài liệu. Nó thành công trong việc:
+PKH is among the most complete and well-designed project knowledge systems available. It succeeds in:
 
-- **Giải quyết vấn đề đúng**: Thông tin dự án phân mảnh là một vấn đề thực tế và đáng kể trong phát triển phần mềm
-- **Áp dụng nguyên tắc thiết kế vững vàng**: Knowledge First, Source Traceability, Confidence Scoring, Model Independence
-- **Cung cấp giải pháp cụ thể và có thể đo lường**: Các thực thể, mối quan hệ, chu kỳ đời sống, và framework đánh giá rõ ràng
-- **Cân bằng giữa lý tưởng và thực tiễn**: Từ ví dụ cụ thể (ADR lifecycle, PaymentService) đến CLI và cấu hình YAML thực tế
+- **Solving the right problem**: Fragmented project information is a real and significant challenge in software development
+- **Applying sound design principles**: Knowledge First, Source Traceability, Confidence Scoring, and Model Independence
+- **Providing concrete, measurable solutions**: Entities, relationships, lifecycle states, and a clear evaluation framework
+- **Balancing idealism with practicality**: From concrete examples (ADR lifecycle, PaymentService) to real CLI commands and YAML configuration
 
 ---
 
