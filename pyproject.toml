@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pkh"
+version = "0.1.0"
+description = "Project Knowledge Harness — continuously evolving, connected, model-independent knowledge system"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.5",
+    "pydantic-settings>=2.0",
+    "pyyaml>=6.0",
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.19",
+    "typer>=0.9",
+    "rich>=13.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.23",
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7",
+    "httpx>=0.24",
+    "python-json-logger>=2.0",
+    "chromadb>=0.4.0",
+    "networkx>=3.0",
+    "tree-sitter>=0.20",
+    "tree-sitter-python>=0.20",
+    "tiktoken>=0.5",
+    "jinja2>=3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "httpx>=0.24",
+    "ruff>=0.1",
+    "mypy>=1.5",
+]
+
+[project.scripts]
+pkh = "pkh.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "C4", "UP"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["src/pkh"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 55
+omit = ["src/pkh/cli/*"]

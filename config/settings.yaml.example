@@ -1,0 +1,55 @@
+sources:
+  git:
+    repos:
+      - url: "https://github.com/org/repo"
+        branch: "main"
+  confluence:
+    url: "https://company.atlassian.net/wiki"
+    spaces: ["ENG", "ARCH"]
+  jira:
+    url: "https://company.atlassian.net"
+    projects: ["PROJ"]
+  documents:
+    paths: ["./docs", "./specs"]
+    patterns: ["*.md", "*.pdf", "*.yaml"]
+
+storage:
+  metadata:
+    provider: "sqlite"
+    sqlite_path: "./data/pkh.db"
+  vector:
+    provider: "chroma"
+    path: "./data/chroma"
+    collection: "knowledge"
+    embedding_model: "text-embedding-3-small"
+  graph:
+    provider: "networkx"
+    persist_path: "./data/graph.json"
+
+retrieval:
+  strategies: ["vector", "keyword", "graph"]
+  fusion:
+    method: "rrf"
+    k: 60
+  reranker:
+    confidence_weight: 0.3
+    lifecycle_weight: 0.2
+    recency_weight: 0.1
+    relevance_weight: 0.4
+
+adapters:
+  default: "mock"
+  openai_model: "gpt-4o-mini"
+  claude_model: "claude-sonnet-4"
+  gemini_model: "gemini-pro"
+
+extraction:
+  llm_enabled: false
+  llm_adapter: "mock"
+  batch_size: 15
+  cache_ttl_days: 7
+  budget_per_run_tokens: 50000
+
+governance:
+  rbac_enabled: false
+  audit_retention_days: 90
