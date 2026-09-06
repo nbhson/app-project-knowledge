@@ -7,7 +7,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime, Float, String, Text, create_engine, select
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Float,
+    Index,
+    String,
+    Text,
+    create_engine,
+    func,
+    or_,
+    select,
+)
 from sqlalchemy.orm import Session, declarative_base
 
 from pkh.models.knowledge import (
@@ -23,6 +35,13 @@ Base = declarative_base()
 
 class KnowledgeRow(Base):
     __tablename__ = "knowledge_objects"
+    __table_args__ = (
+        Index("ix_knowledge_objects_title", "title"),
+        Index("ix_knowledge_objects_content", "content"),
+        Index("ix_knowledge_objects_lifecycle_state", "lifecycle_state"),
+        Index("ix_knowledge_objects_entity_type", "entity_type"),
+        Index("ix_knowledge_objects_object_type", "object_type"),
+    )
     id = Column(String, primary_key=True)
     object_type = Column(String, nullable=False)
     entity_type = Column(String, nullable=True)
@@ -75,7 +94,12 @@ def _row_to_ko(row: KnowledgeRow) -> KnowledgeObject:
             try:
                 sr["last_synced"] = datetime.fromisoformat(sr["last_synced"])
             except Exception:
-                sr["last_synced"] = datetime.now(timezone.utc)
+                # parse fail -> keep as None (let SourceReference default handle it)
+                # do not fallback to now() which would fabricate a timestamp
+                sr["last_synced"] = None  # type: ignore[assignment]
+                # if None is not desired, SourceReference will use default; pop invalid
+                if sr["last_synced"] is None:
+                    sr.pop("last_synced", None)
         srs.append(SourceReference(**sr))
     return KnowledgeObject(
         id=row.id,
@@ -135,6 +159,16 @@ class MetadataStore:
                 return None
             return _row_to_ko(row)
 
+    def get_many(self, ids: list[str]) -> list[KnowledgeObject]:
+        if not ids:
+            return []
+        with Session(self.engine) as session:
+            stmt = select(KnowledgeRow).where(KnowledgeRow.id.in_(ids))
+            rows = session.execute(stmt).scalars().all()
+            # preserve input order and skip missing
+            row_map = {r.id: _row_to_ko(r) for r in rows}
+            return [row_map[i] for i in ids if i in row_map]
+
     def query(
         self,
         filters: dict[str, Any] | None = None,
@@ -143,7 +177,6 @@ class MetadataStore:
         offset: int = 0,
     ) -> list[KnowledgeObject]:
         filters = filters or {}
-        has_text_query = bool(filters.get("query"))
         with Session(self.engine) as session:
             stmt = select(KnowledgeRow)
             if lifecycle_states:
@@ -154,20 +187,43 @@ class MetadataStore:
                         ["ACTIVE", "UPDATED", "EXTRACTED", "VALIDATING", "DISCOVERED"]
                     )
                 )
+            if "ids" in filters and filters["ids"]:
+                # batch fetch by ids - used by graph_search to avoid N+1
+                ids = filters["ids"]
+                if isinstance(ids, (list, tuple, set)):
+                    stmt = stmt.where(KnowledgeRow.id.in_(list(ids)))
             if "entity_type" in filters:
                 stmt = stmt.where(KnowledgeRow.entity_type == filters["entity_type"])
             if "object_type" in filters:
                 stmt = stmt.where(KnowledgeRow.object_type == filters["object_type"])
-            # For text queries, fetch more rows before post-filtering to avoid truncation
-            if has_text_query:
-                # fetch without limit, apply filter in python, then slice
-                rows = session.execute(stmt).scalars().all()
-            else:
-                if "source_type" in filters:
-                    pass
-                stmt = stmt.limit(limit).offset(offset)
-                rows = session.execute(stmt).scalars().all()
+            # Push text filter to DB via ILIKE before limit/offset (fixes pagination + O(N))
+            if "query" in filters and filters["query"]:
+                q = filters["query"]
+                # escape % and _ for LIKE pattern
+                q_escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                pattern = f"%{q_escaped}%"
+                stmt = stmt.where(
+                    or_(
+                        KnowledgeRow.title.ilike(pattern),
+                        KnowledgeRow.content.ilike(pattern),
+                        KnowledgeRow.description.ilike(pattern),
+                    )
+                )
+            # Push source_type filter to DB (JSON field -> LIKE on serialized JSON)
+            # Primary filter in SQL, python post-filter kept only for precise JSON validation
+            if "source_type" in filters:
+                st = filters["source_type"]
+                # JSON stored as TEXT; filter via LIKE for DB-side reduction
+                # e.g. source_references contains '"source_type": "GIT"'
+                st_escaped = st.replace('"', '""')
+                stmt = stmt.where(
+                    KnowledgeRow.source_references.like(f'%"source_type": "{st_escaped}"%')
+                )
+            # Apply limit/offset in DB (correct pagination)
+            stmt = stmt.limit(limit).offset(offset)
+            rows = session.execute(stmt).scalars().all()
             result = [_row_to_ko(r) for r in rows]
+            # Python post-filter for JSON field precise check (remove LIKE false positives)
             if "source_type" in filters:
                 st = filters["source_type"]
                 result = [
@@ -175,23 +231,16 @@ class MetadataStore:
                     for k in result
                     if any(sr.source_type.value == st for sr in k.source_references)
                 ]
-            if "query" in filters and filters["query"]:
-                q = filters["query"].lower()
-                result = [
-                    k
-                    for k in result
-                    if q in k.title.lower()
-                    or q in k.content.lower()
-                    or q in (k.description or "").lower()
-                ]
-            # apply offset/limit after post-filter
-            if has_text_query:
-                result = result[offset : offset + limit]
             return result
 
     def get_by_source(self, source_id: str) -> list[KnowledgeObject]:
         with Session(self.engine) as session:
-            rows = session.execute(select(KnowledgeRow)).scalars().all()
+            # DB-side filter via LIKE on JSON to avoid full scan O(N)
+            sid_escaped = source_id.replace('"', '""')
+            stmt = select(KnowledgeRow).where(
+                KnowledgeRow.source_references.like(f'%"source_id": "{sid_escaped}"%')
+            )
+            rows = session.execute(stmt).scalars().all()
             result = []
             for r in rows:
                 ko = _row_to_ko(r)
@@ -217,12 +266,21 @@ class MetadataStore:
 
     def count(self) -> int:
         with Session(self.engine) as session:
-            return session.query(KnowledgeRow).count()
+            return session.execute(select(func.count()).select_from(KnowledgeRow)).scalar_one()
 
     def claim_outbox(self, batch: int = 100) -> list[OutboxRow]:
         with Session(self.engine) as session:
+            # ORDER BY created_at ensures FIFO; handles concurrent claim via
+            # LIMIT batch + WHERE status='PENDING' ORDER BY created_at.
+            # Prod PostgreSQL would add FOR UPDATE SKIP LOCKED to avoid
+            # concurrent workers double-claiming; SQLite emulation omits it.
             rows = (
-                session.execute(select(OutboxRow).where(OutboxRow.status == "PENDING").limit(batch))
+                session.execute(
+                    select(OutboxRow)
+                    .where(OutboxRow.status == "PENDING")
+                    .order_by(OutboxRow.created_at)
+                    .limit(batch)
+                )
                 .scalars()
                 .all()
             )
@@ -249,9 +307,16 @@ class MetadataStore:
             return [_row_to_ko(r) for r in rows]
 
     def update_lifecycle(self, id: str, new_state: LifecycleState) -> None:
+        from pkh.models.lifecycle import transition as lifecycle_transition
+
         with Session(self.engine) as session:
             row = session.get(KnowledgeRow, id)
             if row:
+                # Validate transition via state machine before DB write
+                ko = _row_to_ko(row)
+                # transition() will raise LifecycleError if invalid
+                lifecycle_transition(ko, new_state)
+                # Only after validation, persist
                 row.lifecycle_state = new_state.value
                 row.updated_at = datetime.now(timezone.utc)
                 session.commit()

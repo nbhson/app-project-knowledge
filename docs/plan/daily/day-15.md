@@ -1,6 +1,6 @@
 # Day 15 — Extraction Pipeline & Validation (Phase 3)
 
-> **Phase:** 3 — Knowledge Extraction Engine | **Date:** Day 15 of 30 | **Goal:** Complete 3-pass pipeline, knowledge validator, conflict resolution
+> **Phase:** 3 — Knowledge Extraction Engine | **Date:** Day 15 of 45 | **Goal:** Complete 3-pass pipeline, knowledge validator, conflict resolution
 
 ---
 

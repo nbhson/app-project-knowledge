@@ -32,7 +32,7 @@ Measures how well the Retrieval Intelligence Engine finds the right knowledge.
 | NDCG@K | Normalized Discounted Cumulative Gain | > 0.75 | Rank-aware relevance scoring |
 | MRR | Mean Reciprocal Rank | > 0.8 | Position of first relevant result |
 | Latency p50 | 50th percentile query latency | < 300ms | Timing middleware |
-| Latency p99 | 99th percentile query latency | < 2000ms | Timing middleware |
+| Latency p99 | 99th percentile query latency | < 1000ms | Timing middleware | <!-- SLO thống nhất: p99 <1000ms per docs/core/8-evaluation-framework.md:34, plan.md:675 — giữ 2000ms cũ là lỗi, đã sửa 06/09 -->
 | Cache Hit Rate | `cached / total queries` | > 60% | Track cache lookups |
 
 ### Dimension 3: Context Quality

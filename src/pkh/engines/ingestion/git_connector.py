@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import subprocess
 from datetime import datetime, timezone
@@ -15,8 +16,10 @@ from pkh.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _run(cmd: list[str], cwd: Path | None = None) -> str:
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+async def _run(cmd: list[str], cwd: Path | None = None) -> str:
+    result = await asyncio.to_thread(
+        subprocess.run, cmd, capture_output=True, text=True, cwd=cwd, timeout=30
+    )
     if result.returncode != 0:
         raise SourceError(f"git command failed {' '.join(cmd)}: {result.stderr}")
     return result.stdout.strip()
@@ -68,7 +71,7 @@ class GitConnector:
     async def connect(self) -> None:
         if self.local_path.exists() and (self.local_path / ".git").exists():
             try:
-                _run(["git", "pull", "origin", self.branch], cwd=self.local_path)
+                await _run(["git", "pull", "origin", self.branch], cwd=self.local_path)
                 logger.info(f"Pulled {self.repo_url} branch {self.branch}")
             except Exception as e:
                 logger.warning(f"git pull failed: {e}")
@@ -82,7 +85,7 @@ class GitConnector:
                 if self.shallow:
                     cmd.extend(["--depth", "1"])
                 cmd.extend([self.repo_url, str(self.local_path)])
-                _run(cmd)
+                await _run(cmd)
                 logger.info(f"Cloned {self.repo_url} -> {self.local_path}")
             else:
                 raise SourceError(f"Cannot clone local path that does not exist: {self.repo_url}")
@@ -101,16 +104,20 @@ class GitConnector:
         files: list[Path] = []
         if self._is_git_repo():
             try:
-                out = _run(
+                out = await _run(
                     ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
                     cwd=self.local_path,
                 )
                 files = [self.local_path / f for f in out.splitlines() if f.strip()]
             except Exception:
-                out = _run(["git", "ls-files"], cwd=self.local_path)
+                out = await _run(["git", "ls-files"], cwd=self.local_path)
                 files = [self.local_path / f for f in out.splitlines() if f.strip()]
         else:
-            files = [p for p in self.local_path.rglob("*") if p.is_file() and ".git" not in p.parts]
+            files = await asyncio.to_thread(
+                lambda: [
+                    p for p in self.local_path.rglob("*") if p.is_file() and ".git" not in p.parts
+                ]
+            )
 
         for f in files:
             # skip hidden and cache
@@ -118,7 +125,8 @@ class GitConnector:
                 continue
             if "__pycache__" in str(f) or ".pyc" in f.suffix:
                 continue
-            if f.stat().st_size > 5_000_000:
+            stat = await asyncio.to_thread(f.stat)
+            if stat.st_size > 5_000_000:
                 continue
             # skip non-text binary by extension
             if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".pdf", ".zip", ".gz", ".pyc"):
@@ -126,7 +134,7 @@ class GitConnector:
                 if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".zip", ".gz"):
                     continue
             try:
-                content = f.read_text(encoding="utf-8", errors="ignore")
+                content = await asyncio.to_thread(f.read_text, encoding="utf-8", errors="ignore")
                 if not content.strip():
                     continue
             except Exception:
@@ -138,7 +146,7 @@ class GitConnector:
             commit_hash = ""
             if self._is_git_repo():
                 try:
-                    commit_hash = _run(
+                    commit_hash = await _run(
                         ["git", "log", "-1", "--format=%H", "--", rel], cwd=self.local_path
                     )
                 except Exception:
@@ -175,7 +183,7 @@ class GitConnector:
             return await self.list_items()
         since_str = since.strftime("%Y-%m-%d %H:%M:%S")
         try:
-            out = _run(
+            out = await _run(
                 ["git", "log", f"--since={since_str}", "--name-only", "--pretty=format:"],
                 cwd=self.local_path,
             )

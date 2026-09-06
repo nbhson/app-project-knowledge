@@ -1,6 +1,6 @@
 # Day 2 — Knowledge Model & Config (Phase 0)
 
-> **Phase:** 0 — Foundation | **Date:** Day 2 of 30 | **Goal:** Complete KnowledgeObject model, lifecycle state machine, and YAML config system
+> **Phase:** 0 — Foundation | **Date:** Day 2 of 45 | **Goal:** Complete KnowledgeObject model, lifecycle state machine, and YAML config system
 
 ---
 

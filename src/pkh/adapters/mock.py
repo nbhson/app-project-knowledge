@@ -29,13 +29,20 @@ class MockAdapter:
             lines.append(f"- {s.source_type.value}: {s.source_id} {s.url or ''}")
         return "\n".join(lines)
 
+    # adapt alias per core/7-context-contract — keep both for compatibility
+    def adapt(self, context: ContextPackage, model_config: dict | None = None) -> str:
+        return self.format_context(context)
+
     async def complete(self, context: ContextPackage, model_config: dict | None = None) -> str:
-        ctx = self.format_context(context)
-        # mock answer based on knowledge
+        # mock answer based on knowledge (no LLM call when llm_enabled=false per adr-004)
         if not context.knowledge:
             return "I don't have relevant knowledge to answer this query."
         top = context.knowledge[0]
-        return f"Based on {top.title} (confidence {top.confidence:.2f}): {top.content[:500]}\n\nSources: {', '.join(s.source_id for s in top.sources)}"
+        sources = ", ".join(s.source_id for s in top.sources)
+        return (
+            f"Based on {top.title} (confidence {top.confidence:.2f}): "
+            f"{top.content[:500]}\n\nSources: {sources}"
+        )
 
     def parse_response(self, response: str) -> dict:
         return {"answer": response}

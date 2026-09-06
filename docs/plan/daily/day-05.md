@@ -1,6 +1,6 @@
 # Day 5 — Jira Connector (Phase 1)
 
-> **Phase:** 1 — Ingestion Engine | **Date:** Day 5 of 30 | **Goal:** Build JiraSourceConnector for fetching issues, building requirement hierarchy
+> **Phase:** 1 — Ingestion Engine | **Date:** Day 5 of 45 | **Goal:** Build JiraSourceConnector for fetching issues, building requirement hierarchy
 
 ---
 

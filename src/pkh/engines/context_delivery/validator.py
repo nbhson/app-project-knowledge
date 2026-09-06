@@ -16,8 +16,8 @@ class ContextValidator:
     def validate(self, package: ContextPackage, max_tokens: int = 128000) -> ValidationResult:
         warnings: list[str] = list(package.warnings)
 
-        # token check
-        token_count = sum(len(c.content) // 4 for c in package.knowledge)
+        # token check — unified with compressor: max(1, len//4)
+        token_count = sum(max(1, len(c.content) // 4) for c in package.knowledge)
         if token_count > max_tokens:
             warnings.append(f"Context exceeds model limit by {token_count - max_tokens} tokens")
 

@@ -11,7 +11,7 @@ sources:
     projects: ["PROJ"]
   documents:
     paths: ["./docs", "./specs"]
-    patterns: ["*.md", "*.pdf", "*.yaml"]
+    patterns: ["*.md", "*.pdf", "*.yaml", "*.json"]
 
 storage:
   metadata:

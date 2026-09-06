@@ -1,6 +1,6 @@
 # Day 7 — Ingestion CLI and Integration Tests (Phase 1)
 
-> **Phase:** 1 — Ingestion Engine | **Date:** Day 7 of 30 | **Goal:** Build CLI commands for ingestion and write integration tests
+> **Phase:** 1 — Ingestion Engine | **Date:** Day 7 of 45 | **Goal:** Build CLI commands for ingestion and write integration tests
 
 ---
 

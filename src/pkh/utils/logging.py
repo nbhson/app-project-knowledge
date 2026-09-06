@@ -23,6 +23,8 @@ class JSONFormatter(logging.Formatter):
         }
         if record.exc_info and record.exc_info[0] is not None:
             log_data["exc_info"] = self.formatException(record.exc_info)
+        if record.stack_info:
+            log_data["stack_info"] = self.formatStack(record.stack_info)
         # include extra fields
         for key, value in record.__dict__.items():
             if key not in (
@@ -61,8 +63,21 @@ def setup_logging(level: str = "INFO") -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JSONFormatter())
     root = logging.getLogger()
-    root.handlers.clear()
-    root.addHandler(handler)
+    # Don't break uvicorn: avoid clearing handlers when uvicorn is running (fix-plan 3.3)
+    uvicorn_logger = logging.getLogger("uvicorn")
+    if uvicorn_logger.handlers:
+        # uvicorn running, preserve its handlers
+        if not root.handlers:
+            root.addHandler(handler)
+        # ensure level is set
+        root.setLevel(getattr(logging, level.upper(), logging.INFO))
+        return
+    if not root.handlers:
+        root.addHandler(handler)
+    else:
+        # safe to reset only when no uvicorn handlers present
+        root.handlers.clear()
+        root.addHandler(handler)
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
 

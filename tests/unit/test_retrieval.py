@@ -1,8 +1,15 @@
 import pytest
-from pkh.engines.retrieval.intent import classify_intent, IntentType
+
+from pkh.engines.retrieval.intent import IntentType, classify_intent
+from pkh.engines.retrieval.reranker import deduplicate, rerank
 from pkh.engines.retrieval.retriever import HybridRetriever
-from pkh.engines.retrieval.reranker import rerank, deduplicate
-from pkh.models.knowledge import KnowledgeObject, SourceReference, EntityType, ObjectType, SourceType
+from pkh.models.knowledge import (
+    EntityType,
+    KnowledgeObject,
+    ObjectType,
+    SourceReference,
+    SourceType,
+)
 from pkh.storage.unified import KnowledgeStore
 
 
@@ -14,9 +21,20 @@ def test_intent_classifier():
 
 @pytest.mark.asyncio
 async def test_retrieval_pipeline(tmp_path):
-    store = KnowledgeStore(metadata_path=str(tmp_path / "db.db"), vector_path=str(tmp_path / "chroma"), graph_path=str(tmp_path / "graph.json"))
+    store = KnowledgeStore(
+        metadata_path=str(tmp_path / "db.db"),
+        vector_path=str(tmp_path / "chroma"),
+        graph_path=str(tmp_path / "graph.json"),
+    )
     sr = SourceReference(source_type=SourceType.GIT, source_id="abc")
-    ko = KnowledgeObject(object_type=ObjectType.ENTITY, entity_type=EntityType.CLASS, title="PaymentService", content="PaymentService handles payments via Stripe", source_references=[sr], confidence=0.9)
+    ko = KnowledgeObject(
+        object_type=ObjectType.ENTITY,
+        entity_type=EntityType.CLASS,
+        title="PaymentService",
+        content="PaymentService handles payments via Stripe",
+        source_references=[sr],
+        confidence=0.9,
+    )
     await store.save(ko)
     retriever = HybridRetriever(store)
     fused, stats = await retriever.retrieve("PaymentService", top_k=5)

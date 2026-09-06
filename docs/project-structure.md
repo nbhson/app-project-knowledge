@@ -53,8 +53,8 @@ project-knowledge-harness/
 │   └── plan/                          # Planning documents
 │       └── plan.md
 │
-└── (source code) — ⏳ PLANNED, NOT YET IMPLEMENTED (see docs/plan/plan.md)
-    ├── pkh/                           # Main package (planned)
+└── (source code) — ✅ IMPLEMENTED (scaffold 06/09, see docs/plan/plan.md#current-status)
+    ├── src/pkh/                       # Main package (implemented)
     │   ├── __init__.py
     │   ├── models/                    # KnowledgeObject, SourceReference, enums
     │   ├── engines/                   # Engine 1-6 implementations
@@ -63,15 +63,16 @@ project-knowledge-harness/
     │   ├── cli/                       # Typer CLI commands
     │   ├── api/                       # FastAPI routes and middleware
     │   ├── config/                    # Pydantic Settings (YAML + env PKH_)
+    │   ├── governance/                # Audit logging, RBAC
     │   └── utils/                     # Logging, exceptions
     │
-    ├── pyproject.toml                 # Project config (planned — Phase 0 Day 1)
-    ├── config/                        # Configuration files (planned)
+    ├── pyproject.toml                 # Project config (implemented — Phase 0 Day 1)
+    ├── config/                        # Configuration files (implemented)
     │   ├── settings.yaml              # Default settings
     │   ├── settings.yaml.example      # Template with all sections
     │   └── settings.prod.yaml         # Production settings
     │
-    ├── tests/                         # Test suite (planned — required per phase)
+    ├── tests/                         # Test suite (36 tests, 67.79% coverage)
     │   ├── conftest.py
     │   ├── unit/
     │   └── integration/

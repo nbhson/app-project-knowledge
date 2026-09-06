@@ -1,6 +1,6 @@
 # Day 28 — REST API (Phase 7)
 
-> **Phase:** 7 — CLI, API & Integration | **Date:** Day 28 of 30 | **Goal:** Build FastAPI app with endpoints and RBAC auth middleware
+> **Phase:** 7 — CLI, API & Integration | **Date:** Day 28 of 45 | **Goal:** Build FastAPI app with endpoints and RBAC auth middleware
 
 ---
 

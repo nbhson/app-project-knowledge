@@ -15,6 +15,24 @@ from pkh.models.knowledge import KnowledgeObject
 from pkh.storage.unified import KnowledgeStore
 
 
+def _truncate_to_tokens(text: str, max_tokens: int = 4000) -> str:
+    """Truncate text to max_tokens via tiktoken if available, fallback to chars."""
+    try:
+        import tiktoken  # type: ignore
+
+        enc = tiktoken.get_encoding("cl100k_base")
+        tokens = enc.encode(text)
+        if len(tokens) > max_tokens:
+            return enc.decode(tokens[:max_tokens])
+        return text
+    except Exception:
+        # fallback: approx 4 chars per token
+        max_chars = max_tokens * 4
+        if len(text) > max_chars:
+            return text[:max_chars]
+        return text
+
+
 class ContextAssembler:
     def __init__(self, store: KnowledgeStore):
         self.store = store
@@ -39,7 +57,7 @@ class ContextAssembler:
                 id=ko.id,
                 type=et,  # type: ignore
                 title=ko.title,
-                content=ko.content[:4000],
+                content=_truncate_to_tokens(ko.content, 4000),
                 confidence=ko.confidence,
                 lifecycle_state=ko.lifecycle_state.value,  # type: ignore
                 relevance_score=float(score),
@@ -51,11 +69,11 @@ class ContextAssembler:
             states.add(ko.lifecycle_state.value)
             confidences.append(ko.confidence)
 
-        # deduplicate sources by (source_type, source_id)
+        # deduplicate sources by url if present, else (source_type, source_id)
         seen = set()
         uniq_sources = []
         for sr in all_sources:
-            key = (sr.source_type.value, sr.source_id)
+            key = sr.url if sr.url else (sr.source_type.value, sr.source_id)
             if key not in seen:
                 seen.add(key)
                 uniq_sources.append(sr)

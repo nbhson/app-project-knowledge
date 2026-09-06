@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -28,10 +29,11 @@ class GraphStore:
             except Exception as e:
                 logger.warning(f"Failed to load graph: {e}")
 
-    def _persist(self) -> None:
+    async def _persist(self) -> None:
         try:
             data = nx.node_link_data(self.graph)
-            self.persist_path.write_text(json.dumps(data))
+            text = json.dumps(data)
+            await asyncio.to_thread(self.persist_path.write_text, text)
         except Exception as e:
             logger.warning(f"Failed to persist graph: {e}")
 
@@ -44,7 +46,7 @@ class GraphStore:
             confidence=ko.confidence,
             properties=ko.properties,
         )
-        self._persist()
+        await self._persist()
 
     async def upsert(self, ko: KnowledgeObject, idempotency_key: str | None = None) -> None:
         # if relationship type, add edge; else add node
@@ -67,7 +69,8 @@ class GraphStore:
                 )
         else:
             await self.add_node(ko)
-        self._persist()
+            return
+        await self._persist()
 
     async def upsert_many(self, kos: list[KnowledgeObject]) -> None:
         for ko in kos:
@@ -77,7 +80,7 @@ class GraphStore:
         self, from_id: str, to_id: str, relation: str, confidence: float = 1.0
     ) -> None:
         self.graph.add_edge(from_id, to_id, relation=relation, confidence=confidence)
-        self._persist()
+        await self._persist()
 
     def get_neighbors(
         self, entity_id: str, relationship_types: list[str] | None = None, max_depth: int = 1
@@ -123,7 +126,7 @@ class GraphStore:
     async def delete_node(self, node_id: str) -> None:
         if node_id in self.graph:
             self.graph.remove_node(node_id)
-            self._persist()
+            await self._persist()
 
     async def count_nodes(self) -> int:
         return self.graph.number_of_nodes()

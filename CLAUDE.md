@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Project Knowledge Harness (PKH)** — A continuously evolving, connected, model-independent knowledge system for software projects. Transforms fragmented project information (Git, Confluence, Jira, Documents) into structured, traceable knowledge with full lifecycle management.
 
-> ⚠️ **Design-spec only — no `src/` yet.** All `pkh ingest/query` commands in docs are specs for Phase 0–7. Do not claim a phase is done without `pytest` logs. See `docs/plan/plan.md#current-status` and `docs/decisions/`.
+> ✅ **Implementation In Progress — `src/` exists (scaffold 06/09, 36 tests, 67.79% coverage).** `pkh ingest/query` are scaffolded in `src/pkh/cli` and `src/pkh/api`; see `docs/plan/fix-plan.md` for remaining gaps. Do not claim a phase is done without `pytest` logs. See `docs/plan/plan.md#current-status` and `docs/decisions/`.
 
 ## Key Commands
 

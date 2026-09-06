@@ -194,8 +194,8 @@ Deliver knowledge to all types of consumers.
 
 | Track | Engines | Stores | Nguồn | Đo lường |
 |-------|---------|--------|-------|----------|
-| **MVP (Day 1-7)** | 1(Git), 2(Python), 3(rule-only), 4(SQLite+Chroma+NetworkX), 5(vector-only), 6(Mock) | 3 layers | Git local | `pkh query` trả về ContextPackage có sources |
-| **Full (Day 8-30)** | Đủ 6 engines, hybrid RRF, đa nguồn | 4 layers | Git+Confluence+Jira+Docs | Đạt Success Criteria trong plan |
+| **MVP (Day 1-10)** | 1(Git), 2(Python), 3(rule-only), 4(SQLite+Chroma+NetworkX), 5(vector-only), 6(Mock) | 3 layers | Git local | `pkh query` trả về ContextPackage có sources |
+| **Full (Day 11-45)** | Đủ 6 engines, hybrid RRF, đa nguồn | 4 layers | Git+Confluence+Jira+Docs | Đạt Success Criteria trong plan |
 
 ## 6 Execution Capabilities (Engines)
 

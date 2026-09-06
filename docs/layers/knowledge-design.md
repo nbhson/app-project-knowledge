@@ -18,11 +18,13 @@ The complete list of entity types that can exist in the system:
 
 **Code Entities:** REPOSITORY, MODULE, PACKAGE, FILE, CLASS, INTERFACE, FUNCTION, METHOD, ENUM, TYPE, VARIABLE
 
-**Project Entities:** EPIC, STORY, TASK, BUG, SUB_TASK
+**Project Entities:** EPIC, STORY, TASK, BUG
 
 **Document Entities:** DOCUMENT, REQUIREMENT, DECISION, BUSINESS_RULE
 
 **System Entities:** API, DATABASE, SERVICE, ENDPOINT
+
+> **Note:** Legacy aliases `ADR→DECISION`, `API_SPEC→API`, `COMPONENT/INFRASTRUCTURE→SERVICE` are mapped via `EntityType._missing_` for DB compat and not counted in the 23 canonical types.
 
 Each entity type has a defined set of properties (see `core/3-knowledge-model.md`).
 

@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from pkh.engines.ingestion.models import RawItem
 from pkh.models.knowledge import SourceType
 
 
+@runtime_checkable
 class SourceConnector(Protocol):
     source_type: SourceType
 

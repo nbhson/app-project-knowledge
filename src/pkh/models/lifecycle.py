@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from pkh.models.knowledge import KnowledgeObject, LifecycleState
 from pkh.utils.exceptions import LifecycleError
 
-# 14 valid transitions per core/4-knowledge-lifecycle.md
+# 13 valid (was 14 in docs; removed SUPERSEDED->ARCHIVED extra
+# and DEPRECATED->SUPERSEDED cycle to avoid loop). See fix-plan 1.4
 VALID_TRANSITIONS: dict[LifecycleState, set[LifecycleState]] = {
     LifecycleState.DISCOVERED: {LifecycleState.EXTRACTED, LifecycleState.ARCHIVED},
     LifecycleState.EXTRACTED: {LifecycleState.VALIDATING, LifecycleState.DISCOVERED},
@@ -18,8 +19,8 @@ VALID_TRANSITIONS: dict[LifecycleState, set[LifecycleState]] = {
         LifecycleState.DEPRECATED,
     },
     LifecycleState.UPDATED: {LifecycleState.VALIDATING, LifecycleState.ACTIVE},
-    LifecycleState.SUPERSEDED: {LifecycleState.DEPRECATED, LifecycleState.ARCHIVED},
-    LifecycleState.DEPRECATED: {LifecycleState.ARCHIVED, LifecycleState.SUPERSEDED},
+    LifecycleState.SUPERSEDED: {LifecycleState.DEPRECATED},
+    LifecycleState.DEPRECATED: {LifecycleState.ARCHIVED},
     LifecycleState.ARCHIVED: set(),
 }
 

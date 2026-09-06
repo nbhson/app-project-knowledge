@@ -1,6 +1,6 @@
 # Day 17 — Vector Store (ChromaDB)
 
-> **Phase:** 4 — Knowledge Storage Engine | **Date:** Day 17 of 30 | **Goal:** Implement VectorStore with ChromaDB backend and embedding generation
+> **Phase:** 4 — Knowledge Storage Engine | **Date:** Day 17 of 45 | **Goal:** Implement VectorStore with ChromaDB backend and embedding generation
 
 ---
 

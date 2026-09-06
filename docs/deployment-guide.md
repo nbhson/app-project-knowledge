@@ -7,7 +7,7 @@
 
 ## Development Deployment
 
-> ⚠️ **Spec until `src/` exists.** Các lệnh `pkh ingest/query` dưới đây là spec cho Phase 0-1; chạy thực tế yêu cầu `pyproject.toml` + `src/pkh/` đã implement. Xem `docs/plan/plan.md#mvp-scope` cho MVP 7 ngày (Git local + SQLite/Chroma/NetworkX, không cần Docker).
+> ✅ **`src/` exists (scaffold 06/09).** Các lệnh `pkh ingest/query` đã scaffold trong `src/pkh/cli` + `src/pkh/api`; MVP 10 ngày (Git local + SQLite/Chroma/NetworkX) chạy được với `PYTHONPATH=src pytest`. Xem `docs/plan/plan.md#mvp-scope` và `docs/plan/fix-plan.md` cho gaps còn lại.
 
 ### Prerequisites
 

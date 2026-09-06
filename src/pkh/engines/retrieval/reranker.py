@@ -55,11 +55,53 @@ def rerank(
     return reranked
 
 
+def _dedupe_key(ko: KnowledgeObject) -> str:
+    """Deterministic fingerprint for dedup.
+
+    Uses id when deterministic (uuid5), but falls back to content
+    fingerprint to catch duplicates even when ids are random uuid4.
+    """
+    # primary: id, secondary: title+content+entity_type (lower, stripped)
+    # Ensures dedup triggers regardless of UUID randomness.
+    t = ko.title.strip().lower()
+    c = ko.content.strip().lower()
+    content_fp = f"{t}|{c}|{ko.entity_type}|{ko.object_type}"
+    return f"{ko.id}::{hash(content_fp)}"
+
+
+def _content_fingerprint(ko: KnowledgeObject) -> str:
+    t = ko.title.strip().lower()
+    c = ko.content.strip().lower()[:500]
+    return f"{t}::{c}::{ko.entity_type}::{ko.object_type}"
+
+
 def deduplicate(items: list[tuple[KnowledgeObject, float]]) -> list[tuple[KnowledgeObject, float]]:
-    seen: dict[str, tuple[KnowledgeObject, float]] = {}
+    seen_by_id: dict[str, tuple[KnowledgeObject, float]] = {}
+    seen_by_content: dict[str, str] = {}  # fingerprint -> id that won
     for ko, score in items:
-        if ko.id not in seen or score > seen[ko.id][1]:
-            seen[ko.id] = (ko, score)
-    result = list(seen.values())
+        fp = _content_fingerprint(ko)
+        # if we have seen same content before, keep higher score
+        if fp in seen_by_content:
+            existing_id = seen_by_content[fp]
+            # keep higher score among duplicates
+            if score > seen_by_id[existing_id][1]:
+                # replace: remove old id entry, add new
+                del seen_by_id[existing_id]
+                seen_by_id[ko.id] = (ko, score)
+                seen_by_content[fp] = ko.id
+            # else skip duplicate
+            continue
+        # id-based dedup (deterministic ids)
+        if ko.id not in seen_by_id or score > seen_by_id[ko.id][1]:
+            # if this id was previously stored under different fp? not possible
+            # but handle update
+            if ko.id in seen_by_id:
+                # remove old fp mapping
+                old_ko = seen_by_id[ko.id][0]
+                old_fp = _content_fingerprint(old_ko)
+                seen_by_content.pop(old_fp, None)
+            seen_by_id[ko.id] = (ko, score)
+            seen_by_content[fp] = ko.id
+    result = list(seen_by_id.values())
     result.sort(key=lambda x: x[1], reverse=True)
     return result

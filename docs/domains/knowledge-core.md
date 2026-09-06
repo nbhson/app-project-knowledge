@@ -57,17 +57,21 @@ Validate: source_references is non-empty?  --> NO: reject, log
     v
 Validate: confidence is 0.0-1.0?  --> NO: default to 0.5
     |
-    v
-Write to ALL layers (transactional)
-    |
-    v
-Acknowledge success / Rollback on failure
+     v
+ Atomic: Metadata + outbox (one transaction)
+     |
+     v
+ Best-effort fan-out to Vector/Graph/Raw (idempotent, retry)
+     |
+     v
+ Acknowledge success / Outbox retry on failure
 ```
 
 ### Cross-Layer Consistency
-- All writes happen in a single transaction
-- If any layer fails, ALL writes are rolled back
-- Periodic consistency check: verify vector IDs exist in metadata store, graph nodes exist in metadata store
+- **Metadata is truth**; Vector/Graph/Raw are **derived and rebuildable via outbox** — see `docs/engines/knowledge-storage-engine.md#write-path`.
+- Writes are atomic only for **Metadata + outbox** in one DB transaction; fan-out to Vector/Graph/Raw is **eventual consistent** with idempotency.
+- If fan-out fails, outbox retries; read-time fallback to Metadata-only (fail-open).
+- Nightly consistency check: `count(metadata ACTIVE) vs count(vector) vs count(graph nodes)`; rebuild if drift >1%.
 
 ---
 

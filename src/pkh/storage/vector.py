@@ -5,7 +5,14 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from pkh.models.knowledge import KnowledgeObject
+from pkh.models.knowledge import (
+    EntityType,
+    KnowledgeObject,
+    LifecycleState,
+    ObjectType,
+    SourceReference,
+    SourceType,
+)
 from pkh.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -13,6 +20,9 @@ logger = get_logger(__name__)
 
 def _simple_embedding(text: str, dim: int = 64) -> list[float]:
     # deterministic hash-based embedding for MVP without openai
+    # TODO: respect settings.vector.embedding_model when OPENAI_API_KEY set
+    #   -> replace hash with text-embedding-3-small via openai embeddings API
+    #   Keep hash fallback when embedding_model == "hash" or no API key.
     h = hashlib.sha256(text.encode()).digest()
     # expand
     vals = []
@@ -24,7 +34,7 @@ def _simple_embedding(text: str, dim: int = 64) -> list[float]:
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
-    return sum(x * y for x, y in zip(a, b))
+    return sum(x * y for x, y in zip(a, b, strict=True))
 
 
 class InMemoryVectorStore:
@@ -92,9 +102,96 @@ class ChromaVectorStore:
 
             self._client = chromadb.PersistentClient(path=path)
             self._collection = self._client.get_or_create_collection(name=collection)
+            self._reconcile()
         except Exception as e:
             logger.warning(f"Chroma not available, using in-memory fallback: {e}")
             self._use_fallback = True
+
+    def _reconcile(self) -> None:
+        """Warm fallback cache from Chroma on startup (restart persistence).
+
+        Sync existing Chroma entries into fallback store so queries survive
+        via fallback lookup when Chroma is temporarily unavailable, and so
+        query can map Chroma ids back to KnowledgeObjects.
+        Best-effort: reconstruction from metadata+document if fallback miss.
+        """
+        if self._use_fallback or self._collection is None:
+            return
+        try:
+            # include embeddings to avoid recompute drift
+            data = self._collection.get(include=["embeddings", "metadatas", "documents"])
+            ids: list[str] = data.get("ids") or []
+            if not ids:
+                return
+            metadatas: list[dict[str, Any]] = data.get("metadatas") or []
+            documents: list[str | None] = data.get("documents") or []
+            embeddings: list[list[float] | None] = data.get("embeddings") or []
+            for idx, ko_id in enumerate(ids):
+                if ko_id in self._fallback.store:
+                    continue
+                md = metadatas[idx] if idx < len(metadatas) and metadatas[idx] is not None else {}
+                doc = documents[idx] if idx < len(documents) and documents[idx] is not None else ""
+                emb = embeddings[idx] if idx < len(embeddings) else None
+                # Reconstruct minimal KO from stored metadata/document
+                try:
+                    entity_type_val = md.get("entity_type") or ""
+                    entity_type = EntityType(entity_type_val) if entity_type_val else None
+                except Exception:
+                    entity_type = None
+                try:
+                    ls_val = md.get("lifecycle_state") or LifecycleState.ACTIVE.value
+                    LifecycleState(ls_val)
+                except Exception:
+                    ls_val = LifecycleState.ACTIVE.value
+                confidence = (
+                    float(md.get("confidence", 0.5))
+                    if isinstance(md.get("confidence"), (int, float, str))
+                    else 0.5
+                )
+                title = md.get("title") or ko_id
+                content = doc or title
+                # need at least one source_reference; use placeholder that
+                # reconciles later via metadata store
+                sr = SourceReference(source_type=SourceType.GIT, source_id="reconciled", url=None)
+                try:
+                    ko_kwargs: dict[str, Any] = {
+                        "id": ko_id,
+                        "title": title,
+                        "content": content,
+                        "source_references": [sr],
+                        "confidence": max(0.0, min(1.0, confidence)),
+                        "lifecycle_state": LifecycleState(ls_val),
+                    }
+                    # object_type required; default ENTITY if entity_type present else ENTITY
+                    ko_kwargs["object_type"] = ObjectType.ENTITY
+                    if entity_type is not None:
+                        ko_kwargs["entity_type"] = entity_type
+                    else:
+                        # choose FILE as generic ENTITY type when unknown
+                        ko_kwargs["entity_type"] = EntityType.FILE
+                    ko = KnowledgeObject(**ko_kwargs)
+                except Exception:
+                    continue
+                text = f"{ko.title} {ko.description or ''} {ko.content}"
+                if emb is None:
+                    emb = _simple_embedding(text)
+                # Store in fallback format compatible with InMemoryVectorStore.query
+                self._fallback.store[ko_id] = {
+                    "id": ko_id,
+                    "embedding": list(emb) if emb is not None else _simple_embedding(text),
+                    "content": text,
+                    "metadata": {
+                        "entity_type": entity_type.value if entity_type else "",
+                        "lifecycle_state": ls_val,
+                        "confidence": confidence,
+                        "title": title,
+                    },
+                    "ko": ko,
+                }
+            if ids:
+                logger.info(f"Vector reconcile: warmed {len(ids)} ids into fallback cache")
+        except Exception as e:
+            logger.warning(f"Vector reconcile failed: {e}")
 
     async def upsert(self, ko: KnowledgeObject, idempotency_key: str | None = None) -> None:
         if self._use_fallback:
@@ -118,6 +215,12 @@ class ChromaVectorStore:
         except Exception as e:
             logger.warning(f"Chroma upsert failed, fallback: {e}")
             await self._fallback.upsert(ko, idempotency_key)
+            return
+        # Dual-write symmetric: keep fallback warm on success (fallback only on exception above)
+        try:
+            await self._fallback.upsert(ko, idempotency_key)
+        except Exception as e:
+            logger.warning(f"Fallback upsert after Chroma success failed: {e}")
 
     async def upsert_many(self, kos: list[KnowledgeObject]) -> None:
         for ko in kos:
@@ -130,11 +233,111 @@ class ChromaVectorStore:
             return await self._fallback.query(query_text, top_k, filters)
         try:
             q_emb = _simple_embedding(query_text)
+            # Respect filters as Chroma where clause if simple; otherwise
+            # post-filter. For MVP post-filter on lifecycle_states to keep
+            # behavior consistent with fallback.
             res = self._collection.query(query_embeddings=[q_emb], n_results=top_k)
-            # need to map back to KO - we don't store full KO in chroma, so we need fallback search via metadata store?
-            # For MVP, we will use fallback in-memory if we need full KO; but we can attempt to query via fallback store synced separately
-            # If chroma returns ids, we need to fetch KO from fallback/metadata - for now use fallback
-            return await self._fallback.query(query_text, top_k, filters)
+            # res shape: {"ids": [[...]], "distances": [[...]],
+            # "metadatas": [[...]], "documents": [[...]]}
+            ids: list[str] = res.get("ids", [[]])[0] if res.get("ids") else []
+            distances: list[float] = res.get("distances", [[]])[0] if res.get("distances") else []
+            metadatas: list[dict[str, Any]] = (
+                res.get("metadatas", [[]])[0] if res.get("metadatas") else []
+            )
+            documents: list[str | None] = (
+                res.get("documents", [[]])[0]
+                if res.get("documents")
+                else []
+                if "documents" in res
+                else []
+            )
+
+            if not ids:
+                return []
+
+            scored: list[tuple[KnowledgeObject, float]] = []
+            for idx, ko_id in enumerate(ids):
+                dist = (
+                    float(distances[idx])
+                    if idx < len(distances) and distances[idx] is not None
+                    else 0.0
+                )
+                score = 1.0 / (1.0 + dist)
+                md: dict[str, Any] = (
+                    metadatas[idx] if idx < len(metadatas) and metadatas[idx] is not None else {}
+                )
+                # respect filters if present
+                if filters and "lifecycle_states" in filters:
+                    if md.get("lifecycle_state") not in filters["lifecycle_states"]:
+                        continue
+                # Map Chroma id back to KnowledgeObject via fallback cache
+                entry = self._fallback.store.get(ko_id)
+                if entry is not None:
+                    ko = entry["ko"]
+                else:
+                    # Fallback miss (e.g., after restart before reconcile or external write)
+                    # Reconstruct minimal KO from Chroma metadata+document
+                    doc = (
+                        documents[idx]
+                        if idx < len(documents) and documents[idx] is not None
+                        else ""
+                    )
+                    try:
+                        entity_type_val = md.get("entity_type") or ""
+                        entity_type = EntityType(entity_type_val) if entity_type_val else None
+                    except Exception:
+                        entity_type = None
+                    ls_val = md.get("lifecycle_state") or LifecycleState.ACTIVE.value
+                    try:
+                        LifecycleState(ls_val)
+                    except Exception:
+                        ls_val = LifecycleState.ACTIVE.value
+                    confidence = (
+                        float(md.get("confidence", 0.5))
+                        if isinstance(md.get("confidence"), (int, float, str))
+                        else 0.5
+                    )
+                    title = md.get("title") or ko_id
+                    content = doc or title
+                    sr = SourceReference(
+                        source_type=SourceType.GIT, source_id="reconciled", url=None
+                    )
+                    try:
+                        ko_kwargs2: dict[str, Any] = {
+                            "id": ko_id,
+                            "title": title,
+                            "content": content,
+                            "source_references": [sr],
+                            "confidence": max(0.0, min(1.0, confidence)),
+                            "lifecycle_state": LifecycleState(ls_val),
+                            "object_type": ObjectType.ENTITY,
+                        }
+                        if entity_type is not None:
+                            ko_kwargs2["entity_type"] = entity_type
+                        else:
+                            ko_kwargs2["entity_type"] = EntityType.FILE
+                        ko = KnowledgeObject(**ko_kwargs2)
+                    except Exception:
+                        continue
+                    # Warm fallback for next time
+                    text = f"{ko.title} {ko.description or ''} {ko.content}"
+                    self._fallback.store[ko_id] = {
+                        "id": ko_id,
+                        "embedding": _simple_embedding(text),
+                        "content": text,
+                        "metadata": {
+                            "entity_type": entity_type.value if entity_type else "",
+                            "lifecycle_state": ls_val,
+                            "confidence": confidence,
+                            "title": title,
+                        },
+                        "ko": ko,
+                    }
+                scored.append((ko, score))
+
+            # Distances already sorted ascending => scores descending, but re-sort for filter cases
+            scored.sort(key=lambda x: x[1], reverse=True)
+            return scored[:top_k]
         except Exception as e:
             logger.warning(f"Chroma query failed: {e}")
             return await self._fallback.query(query_text, top_k, filters)

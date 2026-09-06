@@ -1,6 +1,6 @@
 # Day 13 — LLM-Powered Extraction (Phase 3)
 
-> **Phase:** 3 — Knowledge Extraction Engine | **Date:** Day 13 of 30 | **Goal:** Implement model-agnostic LLM extraction with adapter pattern
+> **Phase:** 3 — Knowledge Extraction Engine | **Date:** Day 13 of 45 | **Goal:** Implement model-agnostic LLM extraction with adapter pattern
 
 ---
 

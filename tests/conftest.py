@@ -1,10 +1,6 @@
-import tempfile
-import shutil
-from pathlib import Path
 import pytest
 
 from pkh.storage.unified import KnowledgeStore
-from pkh.config.settings import Settings
 
 
 @pytest.fixture

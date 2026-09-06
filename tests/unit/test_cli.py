@@ -1,7 +1,6 @@
 from typer.testing import CliRunner
+
 from pkh.cli.main import app
-import tempfile
-from pathlib import Path
 
 runner = CliRunner()
 

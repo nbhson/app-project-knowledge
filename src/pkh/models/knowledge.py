@@ -44,15 +44,29 @@ class EntityType(str, Enum):
     STORY = "STORY"
     TASK = "TASK"
     BUG = "BUG"
-    REQUIREMENT = "REQUIREMENT"
-    ADR = "ADR"
     DOCUMENT = "DOCUMENT"
-    API_SPEC = "API_SPEC"
-    ENDPOINT = "ENDPOINT"
-    COMPONENT = "COMPONENT"
-    SERVICE = "SERVICE"
+    REQUIREMENT = "REQUIREMENT"
+    DECISION = "DECISION"
+    BUSINESS_RULE = "BUSINESS_RULE"
+    API = "API"
     DATABASE = "DATABASE"
-    INFRASTRUCTURE = "INFRASTRUCTURE"
+    SERVICE = "SERVICE"
+    ENDPOINT = "ENDPOINT"
+
+    # Legacy aliases (deprecated, keep for DB compat) — not counted in 23 canonical types
+    # Use _missing_ to map old persisted values to canonical ones.
+
+    @classmethod
+    def _missing_(cls, value: object) -> EntityType | None:  # type: ignore[override]
+        legacy_map = {
+            "ADR": cls.DECISION,
+            "API_SPEC": cls.API,
+            "COMPONENT": cls.SERVICE,
+            "INFRASTRUCTURE": cls.SERVICE,
+        }
+        if isinstance(value, str) and value in legacy_map:
+            return legacy_map[value]
+        return None
 
 
 class RelationshipType(str, Enum):

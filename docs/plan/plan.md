@@ -9,12 +9,12 @@
 
 ## Current Status
 
-> ⚠️ **Design Phase Only — No Source Code Yet**
-> `src/` chưa tồn tại. Mọi benchmark, CLI (`pkh ingest/query`), API trong tài liệu là **spec, chưa được kiểm chứng bằng code**. Không dùng README làm bằng chứng "đã hoàn thành hệ thống".
+> ✅ **Implementation In Progress — `src/` exists (scaffold 06/09, 36 tests, 67.79% coverage).**
+> `src/pkh/` đã scaffold (models, config, storage, engines, adapters, CLI, API). `pkh ingest/query` chạy được ở mức MVP Git+Python+rule-only; gaps còn lại tracked trong `docs/plan/fix-plan.md`. Không đánh dấu phase done khi chưa có `pytest` log.
 
-**Project State:** Documentation and design phase complete. Source code implementation pending (verification gate: no phase is marked done until `pytest` passes for that phase).
+**Project State:** Documentation complete; scaffold implementation done (Phase 0-1 partial). Remaining work per `docs/plan/fix-plan.md` (Phase 0 docs sync → Phase 1 P0 → Phase 2 P1 → Phase 3 P2). Verification gate: no phase is marked done until `pytest` passes for that phase.
 
-This repository currently contains the complete architectural design and documentation for the Project Knowledge Harness (PKH) system. The implementation plan below describes both the completed documentation work and the upcoming development phases.
+This repository contains the complete architectural design and the scaffold implementation for the Project Knowledge Harness (PKH) system. The plan below describes both the documented design and the upcoming hardening phases.
 
 ### Completed Artifacts
 
@@ -114,7 +114,7 @@ Week 7 (Day 41-45)  █████   Phase 9 Hardening & Evaluation (buffer, kh
 
 | Track | Scope | Stores | Sources | Retrieval | Tiêu chí done |
 |-------|-------|--------|---------|-----------|---------------|
-| **MVP (Day 1-10)** | E1(Git only) → E2(Python only) → E3(rule-based only) → E4(SQLite + Chroma + NetworkX) → E5(vector-only) → E6(MockAdapter) | 3 layers (Metadata SQLite, Vector Chroma, Graph NetworkX) — Raw = local FS | Git local filesystem | Vector + keyword (không RRF, không graph traversal) | `pkh ingest --source git://./sample && pkh query "what is PaymentService?"` trả về ContextPackage có sources, `pytest tests/unit -q` pass |
+| **MVP (Day 1-10)** | E1(Git only) → E2(Python only) → E3(rule-based only) → E4(SQLite + Chroma + NetworkX) → E5(vector-only) → E6(MockAdapter) | 3 layers (Metadata SQLite, Vector Chroma, Graph NetworkX) — Raw = local FS | Git local filesystem | Vector-only (không RRF, không graph traversal — thống nhất với adr-005) | `pkh ingest --source git://./sample && pkh query "what is PaymentService?"` trả về ContextPackage có sources, `pytest tests/unit -q` pass |
 | **Full (Day 11-45)** | Thêm Confluence/Jira/Docs, đa ngôn ngữ, LLM enrichment, RRF hybrid, Neo4j/pgvector/S3, RBAC, API, 5-tier compression | 4 layers đầy đủ | Git + Confluence + Jira + Docs + API Specs | Hybrid RRF + Reranking + Deduplication | Đạt mọi Success Criteria ở cuối plan |
 
 **Quy tắc triển khai:**
@@ -650,7 +650,7 @@ Buffer cuối để không trễ deadline. Nếu các phase trước trễ, dùn
 
 | Risk | Mitigation | Doc |
 |------|------------|-----|
-| **Zero code (design-only)** | Verification gate: phase done = `pytest` pass + log chạy thực tế; README ghi rõ `Design-spec only` | `plan.md#current-status`, `README.md` |
+| **Zero code (design-only)** | Verification gate: phase done = `pytest` pass + log chạy thực tế; status tracked in `docs/plan/plan.md#current-status` + `docs/plan/fix-plan.md` | `plan.md#current-status`, `README.md` |
 | **Over-engineering (6 engines + 4 stores cùng lúc)** | MVP Day 1-10 (Git+Python+rule+3 stores+vector-only+Mock) trước Full 45 ngày; nếu MVP trễ > Day 12 thì cắt multi-lang | `plan.md#mvp-scope`, `overall-architecture.md` |
 | **Polyglot sync (4 stores lệch)** | Metadata là truth, outbox + idempotency + reconciler + nightly check; fail-open read | `engines/knowledge-storage-engine.md#write-path`, `decisions/adr-002-storage.md` |
 | LLM API costs & over-confidence | `llm_enabled=false` mặc định, batching, cache `hash(content)`, budget 50k tokens/run, calibration + ECE <0.1 | `engines/knowledge-extraction-engine.md#cost-control`, `decisions/adr-004-llm-adapter.md`, `core/8-evaluation-framework.md` |

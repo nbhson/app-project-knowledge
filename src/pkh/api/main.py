@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from pkh.adapters import get_adapter
-from pkh.api.auth import get_current_role
+from pkh.api.auth import get_current_role, require_permission
 from pkh.config.settings import get_settings
 from pkh.engines.context_delivery.assembler import ContextAssembler
 from pkh.engines.context_delivery.compressor import compress
@@ -27,10 +29,21 @@ from pkh.utils.logging import get_logger, setup_logging
 setup_logging()
 logger = get_logger(__name__)
 
-app = FastAPI(title="PKH API", version="0.1.0", description="Project Knowledge Harness API")
+# Singleton store per fix-plan 1.6
+_store: KnowledgeStore | None = None
+_store_key: tuple[str, str, str] | None = None
 
 
-def get_store() -> KnowledgeStore:
+def _store_key_from_settings() -> tuple[str, str, str]:
+    s = get_settings()
+    return (
+        s.storage.metadata.sqlite_path,
+        s.storage.vector.path,
+        s.storage.graph.persist_path,
+    )
+
+
+def _create_store() -> KnowledgeStore:
     s = get_settings()
     return KnowledgeStore(
         metadata_path=s.storage.metadata.sqlite_path,
@@ -39,9 +52,68 @@ def get_store() -> KnowledgeStore:
     )
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _store, _store_key
+    key = _store_key_from_settings()
+    _store = _create_store()
+    _store_key = key
+    yield
+    # do not clear _store on shutdown to avoid recreation issues; keep singleton
+
+
+app = FastAPI(
+    title="PKH API", version="0.1.0", description="Project Knowledge Harness API", lifespan=lifespan
+)
+
+
+def get_store() -> KnowledgeStore:
+    global _store, _store_key
+    key = _store_key_from_settings()
+    if _store is None or _store_key != key:
+        _store = _create_store()
+        _store_key = key
+    return _store
+
+
+_ALLOWED_SCHEMES = {"git", "confluence", "jira", "document", "file", "http", "https"}
+
+
+def _validate_single_source(v: str | None) -> str | None:
+    if v is None:
+        return v
+    # Path traversal and sensitive absolute path checks are handled in the
+    # ingest endpoint with HTTP 400 (fix-plan 1.7). Here we only validate
+    # scheme whitelist and basic git path presence to avoid 422 vs 400 confusion.
+    if "://" in v:
+        scheme = v.split("://", 1)[0]
+        if scheme not in _ALLOWED_SCHEMES:
+            raise ValueError(f"unsupported scheme: {scheme}")
+        if scheme == "git":
+            path = v[6:]
+            if not path:
+                raise ValueError("git source requires path")
+    return v
+
+
 class IngestRequest(BaseModel):
     source: str | None = None
     sources: list[str] | None = None
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, v: str | None) -> str | None:
+        return _validate_single_source(v)
+
+    @field_validator("sources")
+    @classmethod
+    def validate_sources(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        validated: list[str] = []
+        for item in v:
+            validated.append(_validate_single_source(item))  # type: ignore[arg-type]
+        return validated
 
 
 class QueryRequest(BaseModel):
@@ -63,7 +135,47 @@ async def health():
 
 
 @app.post("/ingest")
-async def ingest(req: IngestRequest):
+async def ingest(req: IngestRequest, role: str = Depends(require_permission("ingest"))):
+    # defense in depth: explicit traversal check returning 400 (Pydantic gives 422)
+    for src in req.sources or ([req.source] if req.source else []):
+        if ".." in src:
+            raise HTTPException(status_code=400, detail="path traversal detected")
+        if src.startswith("git://"):
+            path = src[6:]
+            if ".." in Path(path).parts:
+                raise HTTPException(status_code=400, detail="path traversal detected")
+            try:
+                p = Path(path)
+                if p.is_absolute():
+                    # block sensitive prefixes before resolve (macOS /etc -> /private/etc)
+                    blocked_strs = ["/etc", "/proc", "/sys", "/root", "/private/etc"]
+                    for bs in blocked_strs:
+                        if str(p).startswith(bs):
+                            raise HTTPException(status_code=400, detail=f"blocked path: {p}")
+                    rp = p.resolve()
+                    blocked_paths = [
+                        Path("/etc"),
+                        Path("/proc"),
+                        Path("/sys"),
+                        Path("/private/etc"),
+                        Path("/root"),
+                    ]
+                    for b in blocked_paths:
+                        try:
+                            if rp.is_relative_to(b):
+                                raise HTTPException(status_code=400, detail=f"blocked path: {rp}")
+                        except AttributeError:
+                            if str(rp).startswith(str(b)):
+                                raise HTTPException(
+                                    status_code=400, detail=f"blocked path: {rp}"
+                                ) from None
+                    for bs in blocked_strs:
+                        if str(rp).startswith(bs):
+                            raise HTTPException(status_code=400, detail=f"blocked path: {rp}")
+            except HTTPException:
+                raise
+            except Exception:
+                pass
     settings = get_settings()
     sources = req.sources or ([req.source] if req.source else [])
     if not sources:
@@ -86,16 +198,28 @@ async def ingest(req: IngestRequest):
 
         pipeline = ExtractionPipeline(llm_enabled=settings.extraction.llm_enabled)
         kos, stats = await pipeline.run(items)
-        # set ACTIVE lifecycle after validation pass
-        for ko in kos:
-            ko.lifecycle_state = ko.lifecycle_state  # keep as is, but ensure ACTIVE for query
-            # simple: move DISCOVERED->EXTRACTED->VALIDATING->ACTIVE
-            from pkh.models.knowledge import LifecycleState
+        # Transition via state machine to ACTIVE for querying
+        from pkh.models.knowledge import LifecycleState
+        from pkh.models.lifecycle import transition as lifecycle_transition
 
-            if ko.lifecycle_state.value == "DISCOVERED":
+        transitioned = []
+        for ko in kos:
+            cur = ko.lifecycle_state
+            try:
+                if cur == LifecycleState.DISCOVERED:
+                    ko = lifecycle_transition(ko, LifecycleState.EXTRACTED)
+                    ko = lifecycle_transition(ko, LifecycleState.VALIDATING)
+                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
+                elif cur == LifecycleState.EXTRACTED:
+                    ko = lifecycle_transition(ko, LifecycleState.VALIDATING)
+                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
+                elif cur == LifecycleState.VALIDATING:
+                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
+            except Exception:
+                # if transition fails, keep original but force ACTIVE for MVP querying
                 ko.lifecycle_state = LifecycleState.ACTIVE
-            elif ko.lifecycle_state.value == "EXTRACTED":
-                ko.lifecycle_state = LifecycleState.ACTIVE
+            transitioned.append(ko)
+        kos = transitioned
         await store.save(kos)
         all_kos.extend(kos)
 
@@ -112,7 +236,7 @@ async def ingest_status():
 
 
 @app.post("/query")
-async def query(req: QueryRequest):
+async def query(req: QueryRequest, role: str = Depends(require_permission("query"))):
     store = get_store()
     intent = classify_intent(req.query)
     planner = QueryPlanner()
@@ -177,7 +301,7 @@ async def query(req: QueryRequest):
 
 
 @app.post("/context")
-async def context(req: ContextRequest):
+async def context(req: ContextRequest, role: str = Depends(require_permission("context"))):
     store = get_store()
     intent = classify_intent(req.query)
     retriever = HybridRetriever(store)

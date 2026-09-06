@@ -26,7 +26,7 @@ def rrf_fuse(results: list[RetrievalResult], k: int = 60) -> list[tuple[Knowledg
     score_map: dict[str, float] = defaultdict(float)
     obj_map: dict[str, KnowledgeObject] = {}
     for rr in results:
-        for rank, (obj, _orig_score) in enumerate(zip(rr.results, rr.scores), start=1):
+        for rank, (obj, _orig_score) in enumerate(zip(rr.results, rr.scores, strict=True), start=1):
             score_map[obj.id] += 1.0 / (k + rank)
             # keep highest original score object
             if obj.id not in obj_map:
@@ -80,7 +80,7 @@ class HybridRetriever:
                 tokens = [t for t in tokens if t not in stop]
                 seen_ids = set()
                 all_objs: list[KnowledgeObject] = []
-                for tok in tokens[:4]:
+                for tok in tokens[:8]:
                     cand = self.store.metadata.query(filters={"query": tok}, limit=fetch_limit)
                     for c in cand:
                         if c.id not in seen_ids:
@@ -98,17 +98,26 @@ class HybridRetriever:
                     1 for t in tokens if t in o.title.lower() or t in o.content.lower()
                 )
                 # exact title match boost
-                exact_boost = 5.0 if o.title.lower() == query.lower().strip("?") else 0
-                if o.title.lower() == "knowledgeobject":
-                    exact_boost += 3.0
-                # entity type boost for CLASS/FUNCTION
-                type_boost = 1.0 if o.entity_type and o.entity_type.value in ("CLASS", "FUNCTION", "METHOD") else 0
+                is_exact = o.title.lower() == query.lower().strip("?")
+                exact_boost = 5.0 if is_exact else 0
+                # entity type boost - reduced to avoid dominating relevance
+                is_code = o.entity_type and o.entity_type.value in (
+                    "CLASS",
+                    "FUNCTION",
+                    "METHOD",
+                )
+                type_boost = 0.2 if is_code else 0
                 score = float(cnt + tok_overlap + 1) / 10.0 + exact_boost + type_boost
                 scored.append((o, score))
             scored.sort(key=lambda x: x[1], reverse=True)
             objs_sorted = [o for o, _ in scored[:top_k]]
             scores_sorted = [s for _, s in scored[:top_k]]
-            return RetrievalResult(strategy="keyword", query=query, results=objs_sorted, scores=scores_sorted)
+            return RetrievalResult(
+                strategy="keyword",
+                query=query,
+                results=objs_sorted,
+                scores=scores_sorted,
+            )
         except Exception as e:
             logger.warning(f"keyword search failed: {e}")
             return RetrievalResult(strategy="keyword", query=query, results=[], scores=[])
@@ -123,12 +132,41 @@ class HybridRetriever:
             for c in candidates:
                 neigh = self.store.graph.get_neighbors(c.id, max_depth=2)
                 neighbors_ids.update(neigh)
-            # fetch KOs
+            # fetch KOs - batch query to avoid N+1
+            truncated_ids = list(neighbors_ids)[:top_k]
             objs: list[KnowledgeObject] = []
-            for nid in list(neighbors_ids)[:top_k]:
-                ko = self.store.metadata.get(nid)
-                if ko:
-                    objs.append(ko)
+            if truncated_ids:
+                # prefer batch API if available, fallback to single gets
+                if hasattr(self.store.metadata, "get_many"):
+                    batch = self.store.metadata.get_many(truncated_ids)  # type: ignore[attr-defined]
+                    objs = [ko for ko in batch if ko is not None]
+                elif hasattr(self.store.metadata, "query") and truncated_ids:
+                    # Use query with id filter if supported, else fallback
+                    try:
+                        cand = self.store.metadata.query(
+                            filters={"ids": truncated_ids}, limit=top_k
+                        )
+                        # filter to ensure only requested ids
+                        id_set = set(truncated_ids)
+                        objs = [ko for ko in cand if ko.id in id_set]
+                        if len(objs) < len(truncated_ids):
+                            # fallback for any missing via get
+                            missing = id_set - {ko.id for ko in objs}
+                            for nid in missing:
+                                ko = self.store.metadata.get(nid)
+                                if ko:
+                                    objs.append(ko)
+                    except Exception:
+                        # ultimate fallback: sequential gets
+                        for nid in truncated_ids:
+                            ko = self.store.metadata.get(nid)
+                            if ko:
+                                objs.append(ko)
+                else:
+                    for nid in truncated_ids:
+                        ko = self.store.metadata.get(nid)
+                        if ko:
+                            objs.append(ko)
             scores = [0.7] * len(objs)
             return RetrievalResult(strategy="graph", query=query, results=objs, scores=scores)
         except Exception as e:
@@ -151,16 +189,19 @@ class HybridRetriever:
         if "graph" in strategies:
             tasks.append(self._graph_search(query, top_k))
 
-        # run with timeout per strategy
+        # run with timeout per strategy - concurrent via asyncio.gather
         results: list[RetrievalResult] = []
-        for coro in tasks:
-            try:
-                res = await asyncio.wait_for(coro, timeout=timeout)
-                results.append(res)
-            except asyncio.TimeoutError:
-                logger.warning(f"Strategy timeout for query: {query}")
-            except Exception as e:
-                logger.warning(f"Retrieval error: {e}")
+        if tasks:
+            wrapped = [asyncio.wait_for(coro, timeout=timeout) for coro in tasks]
+            gathered = await asyncio.gather(*wrapped, return_exceptions=True)
+            for res in gathered:
+                if isinstance(res, BaseException):
+                    if isinstance(res, asyncio.TimeoutError):
+                        logger.warning(f"Strategy timeout for query: {query}")
+                    else:
+                        logger.warning(f"Retrieval error: {res}")
+                else:
+                    results.append(res)  # type: ignore[arg-type]
 
         if not results:
             return [], {"vector": 0, "keyword": 0, "graph": 0}
@@ -169,7 +210,10 @@ class HybridRetriever:
         if len(results) > 1:
             fused = rrf_fuse(results, k=self.k)
         else:
-            fused = [(obj, score) for obj, score in zip(results[0].results, results[0].scores)]
+            fused = [
+                (obj, score)
+                for obj, score in zip(results[0].results, results[0].scores, strict=True)
+            ]
 
         stats = {r.strategy: len(r.results) for r in results}
         return fused[:top_k], stats

@@ -1,22 +1,27 @@
 """E2E test: ingest -> query -> context."""
 
 import pytest
-from pkh.engines.ingestion.git_connector import GitConnector
-from pkh.engines.ingestion.sync_manager import SyncManager
-from pkh.engines.extraction.pipeline import ExtractionPipeline
-from pkh.storage.unified import KnowledgeStore
-from pkh.engines.retrieval.intent import classify_intent
-from pkh.engines.retrieval.retriever import HybridRetriever
-from pkh.engines.retrieval.reranker import rerank, deduplicate
+
+from pkh.adapters import get_adapter
 from pkh.engines.context_delivery.assembler import ContextAssembler
 from pkh.engines.context_delivery.compressor import compress
-from pkh.adapters import get_adapter
+from pkh.engines.extraction.pipeline import ExtractionPipeline
+from pkh.engines.ingestion.git_connector import GitConnector
+from pkh.engines.ingestion.sync_manager import SyncManager
+from pkh.engines.retrieval.intent import classify_intent
+from pkh.engines.retrieval.reranker import deduplicate, rerank
+from pkh.engines.retrieval.retriever import HybridRetriever
 from pkh.models.knowledge import LifecycleState
+from pkh.storage.unified import KnowledgeStore
 
 
 @pytest.mark.asyncio
 async def test_e2e_ingest_query(sample_git_repo, tmp_path):
-    store = KnowledgeStore(metadata_path=str(tmp_path / "db.db"), vector_path=str(tmp_path / "chroma"), graph_path=str(tmp_path / "graph.json"))
+    store = KnowledgeStore(
+        metadata_path=str(tmp_path / "db.db"),
+        vector_path=str(tmp_path / "chroma"),
+        graph_path=str(tmp_path / "graph.json"),
+    )
 
     conn = GitConnector(repo_url=str(sample_git_repo))
     mgr = SyncManager([conn])

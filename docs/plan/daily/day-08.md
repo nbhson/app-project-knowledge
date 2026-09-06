@@ -1,6 +1,6 @@
 # Day 8 — AST Parser Foundation (Phase 2)
 
-> **Phase:** 2 — Code Intelligence Engine | **Date:** Day 8 of 30 | **Goal:** Implement AST parser using tree-sitter for language-agnostic code understanding
+> **Phase:** 2 — Code Intelligence Engine | **Date:** Day 8 of 45 | **Goal:** Implement AST parser using tree-sitter for language-agnostic code understanding
 
 ---
 

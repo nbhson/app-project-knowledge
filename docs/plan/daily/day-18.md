@@ -1,6 +1,6 @@
 # Day 18 — Graph Store (NetworkX)
 
-> **Phase:** 4 — Knowledge Storage Engine | **Date:** Day 18 of 30 | **Goal:** Implement GraphStore with NetworkX backend for knowledge graph
+> **Phase:** 4 — Knowledge Storage Engine | **Date:** Day 18 of 45 | **Goal:** Implement GraphStore with NetworkX backend for knowledge graph
 
 ---
 

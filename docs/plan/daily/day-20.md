@@ -1,6 +1,6 @@
 # Day 20 — Intent Detection & Query Planning (Phase 5)
 
-> **Phase:** 5 — Retrieval Intelligence Engine | **Date:** Day 20 of 30 | **Goal:** Implement intent classifier and query planner for intelligent retrieval
+> **Phase:** 5 — Retrieval Intelligence Engine | **Date:** Day 20 of 45 | **Goal:** Implement intent classifier and query planner for intelligent retrieval
 
 ---
 

@@ -2,7 +2,7 @@
 
 > Transform fragmented project information into a continuously evolving, connected, model-independent knowledge system.
 
-> ⚠️ **Status: Design-spec only (no `src/` yet).** Architecture & **45-day** plan are documented and reviewed; implementation is pending. See `docs/plan/plan.md#current-status` for verification gates.
+> ✅ **Status: Implementation In Progress — `src/` exists (scaffold 06/09, 36 tests, 67.79% coverage).** Architecture & **45-day** plan are documented and reviewed; Phase 0-1 partial is scaffolded. Verify: `PYTHONPATH=src pytest --cov`. See `docs/plan/plan.md#current-status` and `docs/plan/fix-plan.md` for verification gates.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ Comparison with Alternative Solutions
 | **Structured Architecture** | ✅ Structured objects + relationships | ❌ Free-form text, minimal structure | ❌ Code only, no semantic relationships | ⚠️ Depends on chunking, lacks ontology |
 | **Source Traceability** | ✅ SourceReference mandatory | ❌ Often missing or manual | ✅ Direct links to source code | ⚠️ Often missing, depends on metadata |
 | **Confidence Scoring** | ✅ 0.0-1.0 for all extracted knowledge | ❌ None | ❌ N/A (code is authoritative source) | ⚠️ Sometimes present, inconsistent |
-| **Knowledge Lifecycle** | ✅ Full lifecycle (7 states, transition rules) | ❌ Static | ❌ N/A | ❌ Often missing |
+| **Knowledge Lifecycle** | ✅ Full lifecycle (8 states, transition rules) | ❌ Static | ❌ N/A | ❌ Often missing |
 | **Model Independence** | ✅ ContextPackage + Adapter | ❌ Tied to specific UI | ✅ Independent API | ⚠️ Prompt-dependent |
 | **Knowledge Scope** | ✅ Comprehensive (code, projects, docs, systems) | ❌ Primarily documents | ❌ Code only | ⚠️ Depends on input data sources |
 | **Quality Measurement** | ✅ Comprehensive framework | ❌ Limited (usage metrics only) | ⚠️ Some metrics (hit rate, latency) | ⚠️ Implementation-dependent |

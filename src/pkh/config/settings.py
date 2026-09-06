@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
+import os
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from pkh.utils.exceptions import ConfigurationError
+
+
+class GitRepoConfig(BaseModel):
+    url: str = "./"
+    branch: str = "main"
+    auth_type: str = "none"
+
 
 class GitSourceConfig(BaseModel):
-    repos: list[dict[str, Any]] = Field(default_factory=list)
+    repos: list[GitRepoConfig] = Field(default_factory=list)
     branch: str = "main"
     auth_type: str = "none"
 
@@ -31,7 +41,7 @@ class JiraSourceConfig(BaseModel):
 
 class DocumentSourceConfig(BaseModel):
     paths: list[str] = Field(default_factory=list)
-    patterns: list[str] = Field(default_factory=lambda: ["*.md", "*.pdf"])
+    patterns: list[str] = Field(default_factory=lambda: ["*.md", "*.pdf", "*.yaml", "*.json"])
 
 
 class SourceConfig(BaseModel):
@@ -42,20 +52,20 @@ class SourceConfig(BaseModel):
 
 
 class MetadataStoreConfig(BaseModel):
-    provider: str = "sqlite"
+    provider: Literal["sqlite", "postgresql"] = "sqlite"
     sqlite_path: str = "./data/pkh.db"
     url: str | None = None
 
 
 class VectorStoreConfig(BaseModel):
-    provider: str = "chroma"
+    provider: Literal["chroma", "pgvector", "memory"] = "chroma"
     path: str = "./data/chroma"
     collection: str = "knowledge"
     embedding_model: str = "text-embedding-3-small"
 
 
 class GraphStoreConfig(BaseModel):
-    provider: str = "networkx"
+    provider: Literal["networkx", "neo4j"] = "networkx"
     persist_path: str = "./data/graph.json"
 
 
@@ -102,6 +112,9 @@ class ExtractionConfig(BaseModel):
 class GovernanceConfig(BaseModel):
     rbac_enabled: bool = False
     audit_retention_days: int = 90
+    audit_path: str = "./data/audit.jsonl"
+    jwt_secret: str | None = None
+    jwt_algorithm: str = "HS256"
 
 
 class Settings(BaseSettings):
@@ -120,14 +133,37 @@ class Settings(BaseSettings):
     def from_yaml(cls, path: str | Path) -> Settings:
         p = Path(path)
         if not p.exists():
-            return cls()
-        data = yaml.safe_load(p.read_text()) or {}
-        # handle flat yaml keys
+            raise ConfigurationError(f"Config YAML not found: {p}")
+        data: dict[str, Any] = yaml.safe_load(p.read_text()) or {}
+        # Ensure env vars override YAML (Pydantic Settings init would otherwise let YAML win)
+        # Remove YAML keys that have corresponding PKH_ env var set
+        for ek in list(os.environ.keys()):
+            if not ek.startswith("PKH_"):
+                continue
+            key_path = ek[4:].lower().split("__")
+            cur: Any = data
+            found = True
+            for part in key_path[:-1]:
+                if isinstance(cur, dict) and part in cur:
+                    cur = cur[part]
+                else:
+                    found = False
+                    break
+            if found and isinstance(cur, dict):
+                leaf = key_path[-1]
+                if leaf in cur:
+                    cur.pop(leaf)
         return cls(**data)
 
     @classmethod
     def load(cls, yaml_path: str | Path | None = None) -> Settings:
-        # try yaml_path, then config/settings.yaml, then env only
+        # Respect PKH_CONFIG_FILE env var as highest priority
+        env_cfg = os.getenv("PKH_CONFIG_FILE")
+        if env_cfg:
+            env_path = Path(env_cfg)
+            if env_path.exists():
+                return cls.from_yaml(env_path)
+            raise ConfigurationError(f"PKH_CONFIG_FILE not found: {env_path}")
         candidates: list[Path] = []
         if yaml_path:
             candidates.append(Path(yaml_path))
@@ -137,18 +173,23 @@ class Settings(BaseSettings):
         for c in candidates:
             if c.exists():
                 return cls.from_yaml(c)
+        # No YAML found: return env-only settings (not silent fallback for explicit path)
+        if yaml_path is not None:
+            raise ConfigurationError(f"Config YAML not found: {yaml_path}")
         return cls()
 
 
 _settings: Settings | None = None
+_settings_lock = threading.Lock()
 
 
 def get_settings(yaml_path: str | Path | None = None, reload: bool = False) -> Settings:
     global _settings
-    if _settings is None or reload:
-        if yaml_path:
-            _settings = Settings.from_yaml(yaml_path)
-        else:
-            _settings = Settings.load()
-        # env overrides already handled by BaseSettings
-    return _settings
+    # thread-safe singleton via lock (fix-plan 3.2)
+    with _settings_lock:
+        if _settings is None or reload:
+            if yaml_path:
+                _settings = Settings.from_yaml(yaml_path)
+            else:
+                _settings = Settings.load()
+        return _settings

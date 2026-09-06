@@ -16,6 +16,15 @@ from pkh.models.knowledge import (
     SourceType,
 )
 
+PKH_NAMESPACE = uuid.UUID(
+    "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+)  # deterministic namespace for KO ids
+
+
+def _deterministic_id(source_id: str, kind: str, name: str) -> str:
+    """Deterministic UUID5 for dedup: same source+kind+name -> same id."""
+    return str(uuid.uuid5(PKH_NAMESPACE, f"{source_id}:{kind}:{name}"))
+
 
 def _make_source_ref(item: RawItem) -> SourceReference:
     st = item.source_type
@@ -52,12 +61,15 @@ def extract_from_code(code_output: CodeKnowledgeOutput, item: RawItem) -> list[K
             et = EntityType.METHOD
         kos.append(
             KnowledgeObject(
-                id=str(uuid.uuid4()),
+                id=_deterministic_id(item.item_id, f"ENTITY:{ent.kind}", ent.name),
                 object_type=ObjectType.ENTITY,
                 entity_type=et,
                 title=ent.name,
                 description=ent.documentation or ent.signature,
-                content=f"{ent.signature}\n{ent.documentation}\nFile: {ent.file_path}:{ent.line_start}-{ent.line_end}",
+                content=(
+                    f"{ent.signature}\n{ent.documentation}\n"
+                    f"File: {ent.file_path}:{ent.line_start}-{ent.line_end}"
+                ),
                 source_references=[ref],
                 confidence=1.0,
                 properties={
@@ -73,7 +85,7 @@ def extract_from_code(code_output: CodeKnowledgeOutput, item: RawItem) -> list[K
     # file entity itself
     kos.append(
         KnowledgeObject(
-            id=str(uuid.uuid4()),
+            id=_deterministic_id(item.item_id, "ENTITY:FILE", item.item_id),
             object_type=ObjectType.ENTITY,
             entity_type=EntityType.FILE,
             title=item.item_id,
@@ -97,7 +109,9 @@ def extract_from_code(code_output: CodeKnowledgeOutput, item: RawItem) -> list[K
             rt = RelationshipType.RELATED_TO
         kos.append(
             KnowledgeObject(
-                id=str(uuid.uuid4()),
+                id=_deterministic_id(
+                    item.item_id, "RELATIONSHIP", f"{rel.from_entity}:{rt.value}:{rel.to_entity}"
+                ),
                 object_type=ObjectType.RELATIONSHIP,
                 title=f"{rel.from_entity} {rt.value} {rel.to_entity}",
                 description=f"{rel.type} from {rel.from_entity} to {rel.to_entity}",
@@ -123,7 +137,7 @@ def extract_from_document(item: RawItem) -> list[KnowledgeObject]:
     if is_adr and ("Consequences" in content or "Context" in content or "Decision" in content):
         kos.append(
             KnowledgeObject(
-                id=str(uuid.uuid4()),
+                id=_deterministic_id(item.item_id, "DECISION", item.title),
                 object_type=ObjectType.DECISION,
                 title=item.title,
                 description="Architecture Decision Record",
@@ -135,12 +149,12 @@ def extract_from_document(item: RawItem) -> list[KnowledgeObject]:
         )
 
     # Requirement extraction from JIRA types handled elsewhere, but detect epics/stories headings
-    # Extract headings
+    # Extract headings — cap 5 to avoid KO explosion
     headings = re.findall(r"^#+\s+(.+)", content, re.M)
-    for h in headings[:10]:
+    for h in headings[:5]:
         kos.append(
             KnowledgeObject(
-                id=str(uuid.uuid4()),
+                id=_deterministic_id(item.item_id, "HEADING", h.strip()),
                 object_type=ObjectType.ENTITY,
                 entity_type=EntityType.DOCUMENT,
                 title=h.strip(),
@@ -152,12 +166,15 @@ def extract_from_document(item: RawItem) -> list[KnowledgeObject]:
             )
         )
 
-    # Business rule detection
-    rules = re.findall(r"(must|should|cannot|required|shall)\s+[^\n\.]{10,120}", content, re.I)
-    for r in rules[:5]:
+    # Business rule detection — word-boundary, non-capturing, cap 3
+    # Use word boundary to avoid matching substrings; capture full rule sentence
+    rules = re.findall(
+        r"\b(?:must|shall|cannot|required|should)\b\s+[^\n\.]{10,120}", content, re.I
+    )
+    for r in rules[:3]:
         kos.append(
             KnowledgeObject(
-                id=str(uuid.uuid4()),
+                id=_deterministic_id(item.item_id, "RULE", r.strip()[:80]),
                 object_type=ObjectType.RULE,
                 title=r.strip()[:80],
                 description="Business rule",
@@ -172,7 +189,7 @@ def extract_from_document(item: RawItem) -> list[KnowledgeObject]:
     if not kos:
         kos.append(
             KnowledgeObject(
-                id=str(uuid.uuid4()),
+                id=_deterministic_id(item.item_id, "ENTITY:DOCUMENT", item.title),
                 object_type=ObjectType.ENTITY,
                 entity_type=EntityType.DOCUMENT,
                 title=item.title,
@@ -188,7 +205,7 @@ def extract_from_document(item: RawItem) -> list[KnowledgeObject]:
         if not has_doc:
             kos.append(
                 KnowledgeObject(
-                    id=str(uuid.uuid4()),
+                    id=_deterministic_id(item.item_id, "ENTITY:DOCUMENT", item.title),
                     object_type=ObjectType.ENTITY,
                     entity_type=EntityType.DOCUMENT,
                     title=item.title,
@@ -199,12 +216,12 @@ def extract_from_document(item: RawItem) -> list[KnowledgeObject]:
                 )
             )
 
-    # Trace references: JIRA-123, ADR-001
+    # Trace references: JIRA-123, ADR-001 — cap 5
     jira_refs = re.findall(r"[A-Z]+-\d+", content)
     for j in set(jira_refs[:5]):
         kos.append(
             KnowledgeObject(
-                id=str(uuid.uuid4()),
+                id=_deterministic_id(item.item_id, "RELATIONSHIP:TRACES_TO", j),
                 object_type=ObjectType.RELATIONSHIP,
                 title=f"{item.title} TRACES_TO {j}",
                 description=f"References {j}",
@@ -214,6 +231,10 @@ def extract_from_document(item: RawItem) -> list[KnowledgeObject]:
                 properties={"from": item.item_id, "to": j, "rel_type": "TRACES_TO"},
             )
         )
+
+    # Hard cap to avoid explosion: max 15 KOs/doc (headings 5 + rules 3 + traces 5 + ADR 1 + doc 1)
+    if len(kos) > 15:
+        kos = kos[:15]
 
     return kos
 
@@ -230,7 +251,7 @@ def extract_from_jira(item: RawItem) -> list[KnowledgeObject]:
     et = map_type.get(issue_type, EntityType.REQUIREMENT)
     return [
         KnowledgeObject(
-            id=str(uuid.uuid4()),
+            id=_deterministic_id(item.item_id, f"JIRA:{issue_type}", item.title or item.item_id),
             object_type=ObjectType.ENTITY,
             entity_type=et,
             title=item.title or item.item_id,

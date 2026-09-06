@@ -1,6 +1,6 @@
 # Day 21 — Hybrid Retrieval (Phase 5)
 
-> **Phase:** 5 — Retrieval Intelligence Engine | **Date:** Day 21 of 30 | **Goal:** Implement parallel hybrid retrieval with vector, keyword, and graph strategies
+> **Phase:** 5 — Retrieval Intelligence Engine | **Date:** Day 21 of 45 | **Goal:** Implement parallel hybrid retrieval with vector, keyword, and graph strategies
 
 ---
 

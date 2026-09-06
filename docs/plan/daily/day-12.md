@@ -1,6 +1,6 @@
 # Day 12 — Entity & Relationship Extraction (Phase 3)
 
-> **Phase:** 3 — Knowledge Extraction Engine | **Date:** Day 12 of 30 | **Goal:** Implement rule-based entity and relationship extraction from ingested data
+> **Phase:** 3 — Knowledge Extraction Engine | **Date:** Day 12 of 45 | **Goal:** Implement rule-based entity and relationship extraction from ingested data
 
 ---
 

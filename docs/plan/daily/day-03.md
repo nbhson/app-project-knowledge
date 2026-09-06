@@ -1,6 +1,6 @@
 # Day 3 — Git Connector (Phase 1)
 
-> **Phase:** 1 — Ingestion Engine | **Date:** Day 3 of 30 | **Goal:** Build GitSourceConnector for cloning, pulling, and tracking changes
+> **Phase:** 1 — Ingestion Engine | **Date:** Day 3 of 45 | **Goal:** Build GitSourceConnector for cloning, pulling, and tracking changes
 
 ---
 

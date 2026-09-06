@@ -1,6 +1,6 @@
 # Day 1 — Project Scaffolding (Phase 0)
 
-> **Phase:** 0 — Foundation | **Date:** Day 1 of 30 | **Goal:** Set up project structure, core types, and testing framework
+> **Phase:** 0 — Foundation | **Date:** Day 1 of 45 | **Goal:** Set up project structure, core types, and testing framework
 
 ---
 
@@ -74,11 +74,11 @@ src/pkh/
 ### 3. Define Core Enums (in `models/knowledge.py`)
 - [ ] `LifecycleState` enum: `DISCOVERED`, `EXTRACTED`, `VALIDATING`, `ACTIVE`, `UPDATED`, `SUPERSEDED`, `DEPRECATED`, `ARCHIVED`
 - [ ] `ObjectType` enum: `ENTITY`, `RELATIONSHIP`, `DECISION`, `RULE`
-- [ ] `EntityType` enum (23 types):
-  - Code: `REPOSITORY`, `MODULE`, `PACKAGE`, `FILE`, `CLASS`, `INTERFACE`, `FUNCTION`, `METHOD`, `ENUM`, `TYPE`, `VARIABLE`
-  - Requirements: `EPIC`, `STORY`, `TASK`, `BUG`, `REQUIREMENT`
-  - Docs: `ADR`, `DOCUMENT`, `API_SPEC`, `ENDPOINT`
-  - Other: `COMPONENT`, `SERVICE`, `DATABASE`, `INFRASTRUCTURE`
+- [ ] `EntityType` enum (23 types — canonical):
+  - Code (11): `REPOSITORY`, `MODULE`, `PACKAGE`, `FILE`, `CLASS`, `INTERFACE`, `FUNCTION`, `METHOD`, `ENUM`, `TYPE`, `VARIABLE`
+  - Project (4): `EPIC`, `STORY`, `TASK`, `BUG`
+  - Document (4): `DOCUMENT`, `REQUIREMENT`, `DECISION`, `BUSINESS_RULE` (legacy alias `ADR→DECISION`)
+  - System (4): `API`, `DATABASE`, `SERVICE`, `ENDPOINT` (legacy aliases `API_SPEC→API`, `COMPONENT/INFRASTRUCTURE→SERVICE` via `_missing_`)
 - [ ] `RelationshipType` enum (15 types):
   - `IMPLEMENTS`, `DEPENDS_ON`, `CALLS`, `USES`, `OWNS`, `DOCUMENTS`, `REQUIRES`, `SUPERSEDES`, `RELATED_TO`, `AFFECTS`, `PART_OF`, `TRACES_TO`, `CONTAINS`, `EXTENDS`, `IMPLEMENTS_IFACE`
 - [ ] `SourceType` enum: `GIT`, `CONFLUENCE`, `JIRA`, `DOCUMENT`, `API_SPEC`

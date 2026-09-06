@@ -33,14 +33,36 @@ from pkh.utils.logging import setup_logging
 app = typer.Typer(help="Project Knowledge Harness CLI")
 console = Console()
 
+# CLI singleton per process (fix-plan 1.6)
+_store_cli: KnowledgeStore | None = None
+_store_cli_key: tuple[str, str, str] | None = None
 
-def get_store() -> KnowledgeStore:
+
+def _store_key_from_settings() -> tuple[str, str, str]:
+    s = get_settings()
+    return (
+        s.storage.metadata.sqlite_path,
+        s.storage.vector.path,
+        s.storage.graph.persist_path,
+    )
+
+
+def _create_store() -> KnowledgeStore:
     s = get_settings()
     return KnowledgeStore(
         metadata_path=s.storage.metadata.sqlite_path,
         vector_path=s.storage.vector.path,
         graph_path=s.storage.graph.persist_path,
     )
+
+
+def get_store() -> KnowledgeStore:
+    global _store_cli, _store_cli_key
+    key = _store_key_from_settings()
+    if _store_cli is None or _store_cli_key != key:
+        _store_cli = _create_store()
+        _store_cli_key = key
+    return _store_cli
 
 
 @app.command()
@@ -86,7 +108,11 @@ def ingest(
         # try config sources
         if settings.sources.git.repos:
             for r in settings.sources.git.repos:
-                url = r.get("url", "./")
+                # repos are typed GitRepoConfig; handle legacy dict for safety
+                if isinstance(r, dict):
+                    url = r.get("url", "./")
+                else:
+                    url = getattr(r, "url", "./")
                 src_list.append(f"git://{url}")
         else:
             src_list = ["git://./"]
@@ -122,12 +148,19 @@ def ingest(
                     continue
                 pipeline = ExtractionPipeline(llm_enabled=settings.extraction.llm_enabled)
                 kos, stats = await pipeline.run(items)
-                # set lifecycle to ACTIVE for querying
+                # Transition via state machine to ACTIVE for querying
+                from pkh.models.lifecycle import transition as lifecycle_transition
+
                 for ko in kos:
                     if ko.lifecycle_state == LifecycleState.DISCOVERED:
-                        ko.lifecycle_state = LifecycleState.ACTIVE
+                        ko = lifecycle_transition(ko, LifecycleState.EXTRACTED)
+                        ko = lifecycle_transition(ko, LifecycleState.VALIDATING)
+                        ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
                     elif ko.lifecycle_state == LifecycleState.EXTRACTED:
-                        ko.lifecycle_state = LifecycleState.ACTIVE
+                        ko = lifecycle_transition(ko, LifecycleState.VALIDATING)
+                        ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
+                    elif ko.lifecycle_state == LifecycleState.VALIDATING:
+                        ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
                 await store.save(kos)
                 total_kos += len(kos)
                 console.print(f"  [green]Extracted {len(kos)} knowledge objects[/green] {stats}")
@@ -206,10 +239,12 @@ def query(
         for s in package.sources[:5]:
             console.print(f"  - {s.source_type.value}: {s.source_id} {s.url or ''}")
         console.print(
-            f"\n[dim]Confidence: {package.confidence:.2f} | Intent: {package.intent} | Warnings: {package.warnings}[/dim]"
+            f"\n[dim]Confidence: {package.confidence:.2f} | "
+            f"Intent: {package.intent} | Warnings: {package.warnings}[/dim]"
         )
         console.print(
-            f"[dim]Latency: {search_stats.latency_ms:.0f}ms | Results: {len(package.knowledge)}[/dim]"
+            f"[dim]Latency: {search_stats.latency_ms:.0f}ms | "
+            f"Results: {len(package.knowledge)}[/dim]"
         )
 
         if show_context:

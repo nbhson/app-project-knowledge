@@ -1,6 +1,6 @@
 # Day 14 — Decision & Rule Detection (Phase 3)
 
-> **Phase:** 3 — Knowledge Extraction Engine | **Date:** Day 14 of 30 | **Goal:** Detect Architecture Decision Records (ADRs), business rules, and constraints
+> **Phase:** 3 — Knowledge Extraction Engine | **Date:** Day 14 of 45 | **Goal:** Detect Architecture Decision Records (ADRs), business rules, and constraints
 
 ---
 

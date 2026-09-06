@@ -1,6 +1,6 @@
 # Day 6 — Document Connector & SyncManager (Phase 1)
 
-> **Phase:** 1 — Ingestion Engine | **Date:** Day 6 of 30 | **Goal:** Build DocumentSourceConnector; implement SyncManager + ChangeDetector
+> **Phase:** 1 — Ingestion Engine | **Date:** Day 6 of 45 | **Goal:** Build DocumentSourceConnector; implement SyncManager + ChangeDetector
 
 ---
 

@@ -1,6 +1,6 @@
 # Day 25 — Model Adapters (Phase 6)
 
-> **Phase:** 6 — Context Delivery Engine | **Date:** Day 25 of 30 | **Goal:** Implement model-agnostic adapters for context delivery
+> **Phase:** 6 — Context Delivery Engine | **Date:** Day 25 of 45 | **Goal:** Implement model-agnostic adapters for context delivery
 
 ---
 

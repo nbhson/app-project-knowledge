@@ -1,6 +1,6 @@
 # Day 4 — Confluence Connector (Phase 1)
 
-> **Phase:** 1 — Ingestion Engine | **Date:** Day 4 of 30 | **Goal:** Build ConfluenceSourceConnector for fetching pages, parsing content, detecting ADRs/specs
+> **Phase:** 1 — Ingestion Engine | **Date:** Day 4 of 45 | **Goal:** Build ConfluenceSourceConnector for fetching pages, parsing content, detecting ADRs/specs
 
 ---
 
