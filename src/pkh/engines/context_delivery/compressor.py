@@ -80,13 +80,26 @@ def compress(package: ContextPackage, max_tokens: int = 8000) -> ContextPackage:
         ratio = total / max(sum(_count_tokens(c.content) for c in kept), 1)
         package.compression_ratio = ratio
 
-    # Tier4: LLM summarize skipped in MVP (llm_enabled=false)
-    # log as warning so consumer knows tier was considered but skipped
-    package.warnings.append("Tier4 LLM summarize skipped (mock)")
-    if package.search_stats:
-        package.search_stats.compression_log.append(
-            {"tier": 4, "skipped": True, "reason": "llm_enabled=false"}
-        )
+    # Tier4: extractive summarize (no LLM): truncate long chunks to first sentences
+    # keeps Tier4 meaningful even when llm_enabled=false
+    tier4_applied = False
+    for c in package.knowledge:
+        if _count_tokens(c.content) > 800:
+            # keep first ~600 tokens worth (2400 chars) + marker
+            sentences = c.content.replace("\n", " ").split(". ")
+            kept_text = ". ".join(sentences[:6])
+            if len(kept_text) < len(c.content):
+                c.content = kept_text[:2400] + " ... [truncated Tier4]"
+                tier4_applied = True
+    if tier4_applied:
+        package.warnings.append("Tier4 extractive summarization applied (no LLM)")
+        if package.search_stats:
+            package.search_stats.compression_log.append({"tier": 4, "extractive": True})
+    else:
+        if package.search_stats:
+            package.search_stats.compression_log.append(
+                {"tier": 4, "skipped": True, "reason": "no long chunks"}
+            )
 
     # Tier5: relationship pruning
     if len(package.relationships) > 20:

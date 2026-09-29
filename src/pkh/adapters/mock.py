@@ -53,3 +53,8 @@ class MockAdapter:
     async def enrich(self, content: str) -> list:
         # No enrichment in mock
         return []
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        from pkh.storage.vector import _simple_embedding
+
+        return [_simple_embedding(t) for t in texts]

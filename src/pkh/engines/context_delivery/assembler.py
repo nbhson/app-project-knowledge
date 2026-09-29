@@ -83,21 +83,30 @@ class ContextAssembler:
         for ko, _ in ranked[:5]:
             neigh_ids = self.store.graph.get_neighbors(ko.id, max_depth=1)
             for nid in neigh_ids[:3]:
-                # find edge data
-                if self.store.graph.graph.has_edge(ko.id, nid):
-                    edge = self.store.graph.graph.get_edge_data(ko.id, nid) or {}
-                    rel_type = edge.get("relation", "RELATED_TO")
-                    conf = edge.get("confidence", 0.8)
-                    relationships.append(
-                        RelationshipChunk(from_id=ko.id, to_id=nid, type=rel_type, confidence=conf)  # type: ignore
-                    )
-                elif self.store.graph.graph.has_edge(nid, ko.id):
-                    edge = self.store.graph.graph.get_edge_data(nid, ko.id) or {}
-                    rel_type = edge.get("relation", "RELATED_TO")
-                    conf = edge.get("confidence", 0.8)
-                    relationships.append(
-                        RelationshipChunk(from_id=nid, to_id=ko.id, type=rel_type, confidence=conf)  # type: ignore
-                    )
+                # use public accessors (do not touch .graph internals)
+                edge = None
+                from_id, to_id = ko.id, nid
+                if hasattr(self.store.graph, "get_edge"):
+                    edge = self.store.graph.get_edge(ko.id, nid)
+                    if edge is None:
+                        edge = self.store.graph.get_edge(nid, ko.id)
+                        if edge is not None:
+                            from_id, to_id = nid, ko.id
+                else:  # fallback for custom stores
+                    g = getattr(self.store.graph, "graph", None)
+                    if g is not None:
+                        if g.has_edge(ko.id, nid):
+                            edge = dict(g.get_edge_data(ko.id, nid) or {})
+                        elif g.has_edge(nid, ko.id):
+                            edge = dict(g.get_edge_data(nid, ko.id) or {})
+                            from_id, to_id = nid, ko.id
+                if edge is None:
+                    continue
+                rel_type = edge.get("relation", "RELATED_TO")
+                conf = float(edge.get("confidence", 0.8))
+                relationships.append(
+                    RelationshipChunk(from_id=from_id, to_id=to_id, type=rel_type, confidence=conf)  # type: ignore
+                )
 
         overall_conf = float(statistics.mean(confidences)) if confidences else 0.0
 
@@ -105,6 +114,11 @@ class ContextAssembler:
         low_conf = sum(1 for c in confidences if c < 0.5)
         if low_conf:
             warnings.append(f"{low_conf} low-confidence chunks included")
+
+        # actual compression ratio: raw vs truncated chars
+        raw_chars = sum(len(ko.content) for ko, _ in ranked)
+        kept_chars = sum(len(c.content) for c in chunks)
+        ratio = (raw_chars / max(1, kept_chars)) if kept_chars else 1.0
 
         return ContextPackage(
             query=query,
@@ -116,5 +130,5 @@ class ContextAssembler:
             warnings=warnings,
             intent=intent.value if isinstance(intent, IntentType) else str(intent),
             search_stats=search_stats,
-            compression_ratio=1.0,
+            compression_ratio=round(ratio, 3),
         )

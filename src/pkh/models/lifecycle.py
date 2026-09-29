@@ -36,12 +36,35 @@ def transition(
 ) -> KnowledgeObject:
     if not can_transition(obj.lifecycle_state, new_state):
         raise LifecycleError(
-            f"Invalid transition {obj.lifecycle_state.value} -> {new_state.value}: not allowed"
+            f"Invalid transition {obj.lifecycle_state.value} -> {new_state.value}: not allowed",
+            from_state=obj.lifecycle_state.value,
+            to_state=new_state.value,
         )
+    from_state = obj.lifecycle_state
+    # guard ACTIVE<->UPDATED ping-pong: max 5 consecutive UPDATED cycles
+    history: list = list(obj.properties.get("_transition_history", []))
+    if from_state == LifecycleState.ACTIVE and new_state == LifecycleState.UPDATED:
+        recent_updated = sum(1 for h in history[-10:] if h.get("to") == "UPDATED")
+        if recent_updated >= 5:
+            raise LifecycleError(
+                f"Too many ACTIVE->UPDATED cycles ({recent_updated}); "
+                "require SUPERSEDED/DEPRECATED instead",
+                from_state=from_state.value,
+                to_state=new_state.value,
+            )
     obj.lifecycle_state = new_state
     obj.updated_at = datetime.now(timezone.utc)
+    entry = {
+        "from": from_state.value,
+        "to": new_state.value,
+        "reason": reason,
+        "at": obj.updated_at.isoformat(),
+    }
+    history.append(entry)
+    # keep last 50 to bound size
+    obj.properties["_transition_history"] = history[-50:]
     if reason:
-        # store reason in properties for audit
+        # store reason in properties for audit (keep last + history)
         obj.properties["_last_transition_reason"] = reason
     return obj
 

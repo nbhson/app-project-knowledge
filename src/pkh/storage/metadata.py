@@ -122,11 +122,21 @@ def _row_to_ko(row: KnowledgeRow) -> KnowledgeObject:
     )
 
 
+def _sqlite_url(sqlite_path: str) -> str:
+    """Build SQLite URL that works on Windows absolute paths and POSIX."""
+    p = Path(sqlite_path)
+    try:
+        posix = p.resolve().as_posix()
+    except Exception:
+        posix = str(sqlite_path).replace("\\", "/")
+    return f"sqlite:///{posix}"
+
+
 class MetadataStore:
     def __init__(self, sqlite_path: str = "./data/pkh.db", echo: bool = False):
         Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
         self.sqlite_path = sqlite_path
-        self.engine = create_engine(f"sqlite:///{sqlite_path}", echo=echo, future=True)
+        self.engine = create_engine(_sqlite_url(sqlite_path), echo=echo, future=True)
         Base.metadata.create_all(self.engine)
 
     def insert_many(self, kos: list[KnowledgeObject]) -> list[str]:

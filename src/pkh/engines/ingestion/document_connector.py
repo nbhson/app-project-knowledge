@@ -14,7 +14,7 @@ from pkh.utils.logging import get_logger
 logger = get_logger(__name__)
 
 # Default patterns synced with config/settings.yaml.example
-DEFAULT_PATTERNS: list[str] = ["*.md", "*.pdf", "*.yaml", "*.json"]
+DEFAULT_PATTERNS: list[str] = ["*.md", "*.pdf", "*.yaml", "*.json", "*.yml", "*.txt", "*.rst"]
 
 
 class DocumentConnector:
@@ -80,35 +80,64 @@ class DocumentConnector:
         pass
 
     async def list_items(self, cursor: str | None = None) -> list[RawItem]:
+        import asyncio
+
         items: list[RawItem] = []
+
+        async def _read_file(file: Path) -> RawItem | None:
+            try:
+                content = await asyncio.to_thread(file.read_text, encoding="utf-8", errors="ignore")
+            except Exception:
+                return None
+            if not content.strip():
+                return None
+            rel = str(file)
+            try:
+                mtime = datetime.fromtimestamp(file.stat().st_mtime, tz=timezone.utc)
+            except Exception:
+                mtime = datetime.now(timezone.utc)
+            return RawItem(
+                item_id=rel,
+                source_type=SourceType.DOCUMENT.value,
+                title=file.name,
+                content=content,
+                content_type=file.suffix.lstrip(".") or "text",
+                metadata={"file_path": rel, "format": file.suffix},
+                updated_at=mtime,
+            )
 
         for base in self.paths:
             if not base.exists():
                 continue
-            for file in base.rglob("*"):
-                if not file.is_file():
-                    continue
-                if not self._matches(file):
-                    continue
-                try:
-                    content = file.read_text(encoding="utf-8", errors="ignore")
-                except Exception:
-                    continue
-                rel = str(file)
-                items.append(
-                    RawItem(
-                        item_id=rel,
-                        source_type=SourceType.DOCUMENT.value,
-                        title=file.name,
-                        content=content,
-                        content_type=file.suffix.lstrip(".") or "text",
-                        metadata={"file_path": rel, "format": file.suffix},
-                        updated_at=datetime.now(timezone.utc),
-                    )
-                )
+            files = [f for f in base.rglob("*") if f.is_file() and self._matches(f)]
+            # concurrent reads to avoid blocking loop
+            results = await asyncio.gather(*[_read_file(f) for f in files[:2000]])
+            items.extend([r for r in results if r is not None])
+        # cache for O(1) get_item
+        self._cache = {it.item_id: it for it in items}
         return items
 
     async def get_item(self, item_id: str) -> RawItem:
+        cache = getattr(self, "_cache", {})
+        if item_id in cache:
+            return cache[item_id]
+        p = Path(item_id)
+        if p.is_file() and self._matches(p):
+            try:
+                import asyncio
+
+                content = await asyncio.to_thread(p.read_text, encoding="utf-8", errors="ignore")
+                return RawItem(
+                    item_id=item_id,
+                    source_type=SourceType.DOCUMENT.value,
+                    title=p.name,
+                    content=content,
+                    content_type=p.suffix.lstrip(".") or "text",
+                    metadata={"file_path": item_id, "format": p.suffix},
+                    updated_at=datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc),
+                )
+            except Exception as e:
+                raise FileNotFoundError(f"{item_id}: {e}") from e
         items = await self.list_items()
         for it in items:
             if it.item_id == item_id:

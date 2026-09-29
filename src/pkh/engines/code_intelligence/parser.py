@@ -168,7 +168,7 @@ class PythonParser:
                             supers.append(m.group(0))
                 sig = content[node.start_byte : node.end_byte].split(":")[0][:200]
                 ent = CodeEntity(
-                    id=f"{file_path}::CLASS::{name}",
+                    id=f"{file_path}::CLASS::{name}:{node.start_point[0] + 1}",
                     kind="CLASS",
                     name=name,
                     file_path=file_path,
@@ -192,16 +192,34 @@ class PythonParser:
                     content[params_node.start_byte : params_node.end_byte] if params_node else "()"
                 )
                 sig = f"{name}{params}"
+                line_no = node.start_point[0] + 1
                 ent = CodeEntity(
-                    id=f"{file_path}::FUNC::{name}:{node.start_point[0]}",
+                    id=f"{file_path}::{kind}::{name}:{line_no}",
                     kind=kind,
                     name=name,
                     file_path=file_path,
-                    line_start=node.start_point[0] + 1,
+                    line_start=line_no,
                     line_end=node.end_point[0] + 1,
                     signature=sig,
                 )
                 entities.append(ent)
+                # CALLS: scan subtree for call nodes (parity with AST backend)
+                try:
+                    stack = list(node.children)
+                    while stack:
+                        ch = stack.pop()
+                        if ch.type == "call":
+                            func_node = ch.child_by_field_name("function")
+                            if func_node is not None:
+                                txt = content[func_node.start_byte : func_node.end_byte]
+                                callee = txt.split(".")[-1].split("(")[0].strip()[:80]
+                                if callee and re.match(r"^[A-Za-z_]\w*$", callee):
+                                    relationships.append(
+                                        CodeRelationship(ent.id, callee, "CALLS", 0.8)
+                                    )
+                        stack.extend(ch.children)
+                except Exception:
+                    pass
             elif ntype == "decorated_definition":
                 # unwrap: the actual definition is in field "definition"
                 # walk will handle the inner definition via children loop,
@@ -277,7 +295,7 @@ class PythonParser:
                 doc = ast.get_docstring(node) or ""
                 sig = f"class {node.name}({', '.join(supers)})" if supers else f"class {node.name}"
                 ent = CodeEntity(
-                    id=f"{file_path}::CLASS::{node.name}",
+                    id=f"{file_path}::CLASS::{node.name}:{getattr(node, 'lineno', 1)}",
                     kind="CLASS",
                     name=node.name,
                     file_path=file_path,
@@ -300,7 +318,7 @@ class PythonParser:
                             args_txt = "(...)"
                         sig_m = f"{item.name}{args_txt}"
                         ent_m = CodeEntity(
-                            id=f"{file_path}::METHOD::{node.name}.{item.name}",
+                            id=f"{file_path}::METHOD::{node.name}.{item.name}:{item.lineno}",
                             kind="METHOD",
                             name=f"{node.name}.{item.name}",
                             file_path=file_path,
@@ -436,8 +454,11 @@ class CodeParser:
         if file_path.endswith(".py"):
             entities, relationships, errors = self.py_parser.parse_file(file_path, content)
         else:
-            # generic: treat as document, use public regex helper
-            entities, relationships, errors = self.py_parser.parse_with_regex(file_path, content)
+            # non-Python: do NOT fake Python entities via regex.
+            # Return empty with note so extractor falls back to document entity
+            # (prevents false CLASS/FUNCTION for .ts/.java).
+            errors = [f"non-python file {file_path}: skipped code parse, use document extraction"]
+            entities, relationships = [], []
 
         # build symbol table
         symbol_table: dict[str, list[str]] = {file_path: [e.name for e in entities]}

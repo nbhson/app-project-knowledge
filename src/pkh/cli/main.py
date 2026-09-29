@@ -12,23 +12,19 @@ from rich.table import Table
 
 from pkh.adapters import get_adapter
 from pkh.config.settings import get_settings
-from pkh.engines.context_delivery.assembler import ContextAssembler
-from pkh.engines.context_delivery.compressor import compress
-from pkh.engines.context_delivery.models import SearchStats
-from pkh.engines.context_delivery.validator import ContextValidator
 from pkh.engines.extraction.pipeline import ExtractionPipeline
 from pkh.engines.ingestion.confluence_connector import ConfluenceConnector
 from pkh.engines.ingestion.document_connector import DocumentConnector
 from pkh.engines.ingestion.git_connector import GitConnector
 from pkh.engines.ingestion.jira_connector import JiraConnector
 from pkh.engines.ingestion.sync_manager import SyncManager
-from pkh.engines.retrieval.intent import QueryPlanner, classify_intent
-from pkh.engines.retrieval.reranker import deduplicate, rerank
-from pkh.engines.retrieval.retriever import HybridRetriever
 from pkh.governance.audit import AuditLog
 from pkh.models.knowledge import LifecycleState
+from pkh.services.query import run_query_pipeline
 from pkh.storage.unified import KnowledgeStore
-from pkh.utils.logging import setup_logging
+from pkh.utils.logging import get_logger, setup_logging
+
+logger = get_logger(__name__)
 
 app = typer.Typer(help="Project Knowledge Harness CLI")
 console = Console()
@@ -73,7 +69,12 @@ def init(
     """Scaffold config."""
     setup_logging()
     dest = Path(path) / "config" / "settings.yaml"
-    example = Path("config/settings.yaml.example")
+    # resolve example relative to package root (robust to cwd)
+    candidates = [
+        Path(__file__).resolve().parents[4] / "config" / "settings.yaml.example",
+        Path("config/settings.yaml.example"),
+    ]
+    example = next((c for c in candidates if c.exists()), candidates[-1])
     if dest.exists() and not force:
         console.print(f"[yellow]Already exists: {dest} (use --force to overwrite)[/yellow]")
         raise typer.Exit(code=1)
@@ -146,21 +147,48 @@ def ingest(
                 if not items:
                     console.print("  [yellow]No items found, skipping[/yellow]")
                     continue
-                pipeline = ExtractionPipeline(llm_enabled=settings.extraction.llm_enabled)
+                pipeline = ExtractionPipeline(
+                    llm_enabled=settings.extraction.llm_enabled,
+                    llm_adapter=(
+                        get_adapter(settings.extraction.llm_adapter)
+                        if settings.extraction.llm_enabled
+                        else None
+                    ),
+                    budget_tokens=settings.extraction.budget_per_run_tokens,
+                    batch_size=settings.extraction.batch_size,
+                )
                 kos, stats = await pipeline.run(items)
                 # Transition via state machine to ACTIVE for querying
                 from pkh.models.lifecycle import transition as lifecycle_transition
 
+                transitioned = []
                 for ko in kos:
-                    if ko.lifecycle_state == LifecycleState.DISCOVERED:
-                        ko = lifecycle_transition(ko, LifecycleState.EXTRACTED)
-                        ko = lifecycle_transition(ko, LifecycleState.VALIDATING)
-                        ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
-                    elif ko.lifecycle_state == LifecycleState.EXTRACTED:
-                        ko = lifecycle_transition(ko, LifecycleState.VALIDATING)
-                        ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
-                    elif ko.lifecycle_state == LifecycleState.VALIDATING:
-                        ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
+                    try:
+                        if ko.lifecycle_state == LifecycleState.DISCOVERED:
+                            ko = lifecycle_transition(
+                                ko, LifecycleState.EXTRACTED, reason="cli-ingest"
+                            )
+                            ko = lifecycle_transition(
+                                ko, LifecycleState.VALIDATING, reason="cli-ingest"
+                            )
+                            ko = lifecycle_transition(
+                                ko, LifecycleState.ACTIVE, reason="cli-ingest"
+                            )
+                        elif ko.lifecycle_state == LifecycleState.EXTRACTED:
+                            ko = lifecycle_transition(
+                                ko, LifecycleState.VALIDATING, reason="cli-ingest"
+                            )
+                            ko = lifecycle_transition(
+                                ko, LifecycleState.ACTIVE, reason="cli-ingest"
+                            )
+                        elif ko.lifecycle_state == LifecycleState.VALIDATING:
+                            ko = lifecycle_transition(
+                                ko, LifecycleState.ACTIVE, reason="cli-ingest"
+                            )
+                    except Exception as e:
+                        logger.warning(f"Lifecycle transition failed for {ko.id}: {e}")
+                    transitioned.append(ko)
+                kos = transitioned
                 await store.save(kos)
                 total_kos += len(kos)
                 console.print(f"  [green]Extracted {len(kos)} knowledge objects[/green] {stats}")
@@ -173,11 +201,39 @@ def ingest(
     asyncio.run(_run())
 
 
+def _resolve_cli_adapter(
+    settings,
+    provider: str | None,
+    base_url: str | None,
+    model: str | None,
+    api_key: str | None,
+):
+    """Resolve adapter with CLI overrides (explicit flags win over settings/env)."""
+    import os as _os
+
+    name = provider or settings.adapters.default
+    key = api_key or _os.getenv("PKH_CUSTOM_API_KEY") or _os.getenv("OPENAI_API_KEY")
+    return get_adapter(
+        name,
+        base_url=base_url,
+        model=model,
+        api_key=key,
+    )
+
+
 @app.command()
 def query(
     question: str = typer.Argument(..., help="Natural language query"),
     top_k: int = typer.Option(5, help="Top K results"),
     show_context: bool = typer.Option(False, help="Show raw context package"),
+    provider: str | None = typer.Option(
+        None, "--provider", help="LLM provider: mock/custom/<name in adapters.providers>"
+    ),
+    base_url: str | None = typer.Option(None, "--base-url", help="Custom provider base URL"),
+    model: str | None = typer.Option(None, "--model", help="Custom provider model"),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="Custom provider API key (or env PKH_CUSTOM_API_KEY)"
+    ),
 ):
     """Natural language query."""
     setup_logging()
@@ -185,53 +241,20 @@ def query(
 
     async def _run():
         store = get_store()
-        intent = classify_intent(question)
+        package, search_stats, intent = await run_query_pipeline(store, question, top_k=top_k)
         console.print(f"[dim]Intent: {intent.value}[/dim]")
-        retriever = HybridRetriever(store)
-        planner = QueryPlanner()
-        sub_qs = planner.plan(question, intent)
-        all_fused = []
-        stats_total: dict = {}
-        import time
 
-        start = time.time()
-        for sq in sub_qs:
-            fused, stats = await retriever.retrieve(sq, top_k=top_k)
-            all_fused.extend(fused)
-            for k, v in stats.items():
-                stats_total[k] = stats_total.get(k, 0) + v
+        from pkh.utils.exceptions import AdapterError, ConfigurationError
 
-        all_fused = deduplicate(all_fused)
-        all_fused = rerank(all_fused)
-        active = [
-            p for p in all_fused if p[0].lifecycle_state.value in ("ACTIVE", "UPDATED", "EXTRACTED")
-        ]
-        if not active:
-            active = all_fused
-
-        assembler = ContextAssembler(store)
-        search_stats = SearchStats(
-            vector_results=stats_total.get("vector", 0),
-            keyword_results=stats_total.get("keyword", 0),
-            graph_results=stats_total.get("graph", 0),
-            total_before_dedup=len(all_fused),
-            total_after_dedup=len(active),
-            strategies_used=list(stats_total.keys()),
-            latency_ms=(time.time() - start) * 1000,
-        )
-        package = await assembler.assemble(
-            question, active[:top_k], intent=intent, search_stats=search_stats
-        )
-        package = compress(package)
-        validator = ContextValidator()
-        vr = validator.validate(package)
-        if vr.warnings:
-            for w in vr.warnings:
-                if w not in package.warnings:
-                    package.warnings.append(w)
-
-        adapter = get_adapter(settings.adapters.default)
-        answer = await adapter.complete(package)
+        try:
+            adapter = _resolve_cli_adapter(settings, provider, base_url, model, api_key)
+            answer = await adapter.complete(package)
+        except ConfigurationError as e:
+            console.print(f"[red]Provider not configured: {e}[/red]")
+            raise typer.Exit(code=2) from e
+        except AdapterError as e:
+            console.print(f"[red]Provider request failed: {e}[/red]")
+            raise typer.Exit(code=2) from e
 
         console.print("\n[bold]Answer:[/bold]")
         console.print(answer)
@@ -263,30 +286,29 @@ def query(
 def context(
     query: str = typer.Option(..., "--query", help="Query to get context for"),
     top_k: int = typer.Option(5, help="Top K"),
+    provider: str | None = typer.Option(
+        None, "--provider", help="LLM provider for answer (default: context only)"
+    ),
+    model: str | None = typer.Option(None, "--model", help="Custom provider model override"),
 ):
     """Get raw ContextPackage JSON."""
     setup_logging()
+    settings = get_settings()
 
     async def _run():
         store = get_store()
-        intent = classify_intent(query)
-        retriever = HybridRetriever(store)
-        fused, stats = await retriever.retrieve(query, top_k=top_k)
-        fused = deduplicate(fused)
-        fused = rerank(fused)
-        assembler = ContextAssembler(store)
-        search_stats = SearchStats(
-            vector_results=stats.get("vector", 0),
-            keyword_results=stats.get("keyword", 0),
-            graph_results=stats.get("graph", 0),
-            total_before_dedup=len(fused),
-            total_after_dedup=len(fused),
-            strategies_used=list(stats.keys()),
-        )
-        package = await assembler.assemble(
-            query, fused[:top_k], intent=intent, search_stats=search_stats
-        )
-        package = compress(package)
+        package, _, intent = await run_query_pipeline(store, query, top_k=top_k)
+        if provider or model:
+            from pkh.utils.exceptions import AdapterError, ConfigurationError
+
+            try:
+                adapter = _resolve_cli_adapter(settings, provider, None, model, None)
+                answer = await adapter.complete(package)
+                console.print(f"[bold]Answer ({provider or settings.adapters.default}):[/bold]")
+                console.print(answer)
+            except (AdapterError, ConfigurationError) as e:
+                console.print(f"[red]Provider failed: {e}[/red]")
+                raise typer.Exit(code=2) from e
         console.print_json(
             json.dumps(package.model_dump(mode="json"), indent=2, ensure_ascii=False)
         )
@@ -302,13 +324,15 @@ def graph(
     """Visualize knowledge graph."""
     setup_logging()
     store = get_store()
+    depth = max(1, min(int(depth), 5))
 
-    # find entity by name
+    # find entity by name — score all candidates, pick best title match
     kos = store.metadata.query(filters={"query": entity}, limit=5)
     if not kos:
         console.print(f"[red]Entity not found: {entity}[/red]")
         raise typer.Exit(code=1)
-    target = kos[0]
+    # prefer exact title match, else first
+    target = next((k for k in kos if k.title.lower() == entity.lower()), kos[0])
     console.print(f"[cyan]Entity: {target.title} ({target.id}) type={target.entity_type}[/cyan]")
     neighbors = store.graph.get_neighbors(target.id, max_depth=depth)
     console.print(f"[dim]Neighbors (depth={depth}): {len(neighbors)}[/dim]")
@@ -399,11 +423,75 @@ def audit(
 
 
 @app.command()
+def providers():
+    """List configured LLM providers (secrets redacted)."""
+    import os as _os
+
+    setup_logging()
+    settings = get_settings()
+    table = Table(title="LLM Providers")
+    table.add_column("Name")
+    table.add_column("Base URL")
+    table.add_column("Model")
+    table.add_column("Embedding")
+    table.add_column("Has Key")
+    table.add_column("Default")
+    for name, p in settings.adapters.providers.items():
+        has_key = bool(
+            p.api_key or _os.getenv("OPENAI_API_KEY") or _os.getenv("PKH_CUSTOM_API_KEY")
+        )
+        table.add_row(
+            name,
+            p.base_url or "-",
+            p.model or "-",
+            p.embedding_model or "-",
+            "yes" if has_key else "no",
+            "yes" if name == settings.adapters.default else "",
+        )
+    if settings.adapters.custom_base_url or settings.adapters.custom_model:
+        has_key = bool(
+            settings.adapters.custom_api_key
+            or _os.getenv("OPENAI_API_KEY")
+            or _os.getenv("PKH_CUSTOM_API_KEY")
+        )
+        table.add_row(
+            "custom",
+            settings.adapters.custom_base_url or "-",
+            settings.adapters.custom_model or "-",
+            settings.adapters.custom_embedding_model or "-",
+            "yes" if has_key else "no",
+            "yes" if settings.adapters.default == "custom" else "",
+        )
+    for builtin in ("mock", "claude", "gpt", "gemini", "local"):
+        table.add_row(
+            builtin, "-", "-", "-", "-", "yes" if settings.adapters.default == builtin else ""
+        )
+    console.print(table)
+    console.print(f"[dim]Default: {settings.adapters.default}[/dim]")
+
+
+@app.command()
 def sync(
     incremental: bool = typer.Option(False, help="Incremental sync"),
 ):
     """Sync all sources."""
-    ingest(source=None, sources=None, sync=incremental)
+    if incremental:
+        import asyncio as asyncio_lib
+        from datetime import datetime, timedelta, timezone
+
+        from pkh.engines.ingestion.document_connector import DocumentConnector
+        from pkh.engines.ingestion.git_connector import GitConnector
+        from pkh.engines.ingestion.sync_manager import SyncManager
+
+        async def _incr():
+            mgr = SyncManager([GitConnector(repo_url="./"), DocumentConnector(paths=["./docs"])])
+            since = datetime.now(timezone.utc) - timedelta(days=1)
+            res = await mgr.run_incremental_sync(since)
+            console.print(f"[green]Incremental sync: {res.total_items_processed} items[/green]")
+
+        asyncio_lib.run(_incr())
+    else:
+        ingest(source=None, sources=None, sync=False)
 
 
 if __name__ == "__main__":

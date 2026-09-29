@@ -10,9 +10,10 @@ PKH tuyên bố "Model Independence" — phải swap LLM bằng config, không �
 
 ## Decision
 
-- **Pattern:** Strategy `ModelAdapter` protocol (`adapt`, `parse_response`, `get_token_limit`). Mọi LLM call đi qua adapter. Config `adapters.default = "mock"` — đổi model = đổi YAML.
-- **Adapters:** `ClaudeAdapter`, `GPTAdapter`, `GeminiAdapter`, `LocalLLMAdapter`, `MockAdapter`. Thêm adapter mới = implement protocol, register trong config.
-- **Mặc định:** `extraction.llm_enabled=false`. LLM chỉ bật cho case rule không cover. MVP không gọi LLM thật.
+- **Pattern:** Strategy `ModelAdapter` protocol (`complete`, `format_context`/`adapt`, `parse_response`, `get_token_limit`, `embed`). Mọi LLM call đi qua adapter. Config `adapters.default = "mock"` — đổi model = đổi YAML.
+- **Adapters:** `ClaudeAdapter`, `GPTAdapter`, `GeminiAdapter`, `LocalLLMAdapter`, `MockAdapter`, `OpenAICompatibleAdapter` (`custom`, alias `CustomAdapter`, `src/pkh/adapters/custom.py`). Thêm adapter mới = implement protocol, register trong config.
+- **Custom OpenAI-compatible provider (no mock):** `base_url + model + api_key` — dùng được với OpenAI, Azure OpenAI (qua base_url), OpenRouter, Ollama, vLLM, LM Studio hoặc bất kỳ server nào expose `POST {base_url}/chat/completions` + `POST {base_url}/embeddings`. Chọn qua shortcut `adapters.custom_*` hoặc named entry `adapters.providers.<name>` + `adapters.default = "<name>"` / `"provider:<name>"` / `get_adapter("custom"|"provider:<name>")`. API key ưu tiên env (`PKH_CUSTOM_API_KEY` / `OPENAI_API_KEY`, named: `PKH_ADAPTERS__PROVIDERS__<NAME>__API_KEY`), không commit secret. Lỗi HTTP/payload lỗi raise `AdapterError` (không fallback silent sang mock).
+- **Mặc định:** `extraction.llm_enabled=false`. LLM chỉ bật cho case rule không cover (`extraction.llm_adapter: "mock"` → đổi sang `"custom"` / `"provider:<name>"` khi cần enrichment thật). MVP không gọi LLM thật.
 - **Test:** CI bắt buộc dùng `MockAdapter` — không test nào gọi API thật. Prompt test bằng golden file.
 
 ## Consequences

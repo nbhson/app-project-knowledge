@@ -42,10 +42,28 @@ adapters:
   openai_model: "gpt-4o-mini"
   claude_model: "claude-sonnet-4"
   gemini_model: "gemini-pro"
+  # Custom OpenAI-compatible provider (no mock): base_url + model + api_key.
+  # Use either the shortcut below or named entries under providers:.
+  # API key: prefer env (PKH_CUSTOM_API_KEY / OPENAI_API_KEY), never commit secrets.
+  custom_base_url: "https://api.openai.com/v1"
+  custom_model: "gpt-4o-mini"
+  custom_api_key: null
+  custom_embedding_model: "text-embedding-3-small"
+  providers: {}
+    # my-ollama:
+    #   base_url: "http://localhost:11434/v1"
+    #   model: "llama3.1"
+    #   api_key: "ollama"  # or env PKH_ADAPTERS__PROVIDERS__MY-OLLAMA__API_KEY
+    #   embedding_model: "nomic-embed-text"
+    #   timeout_seconds: 120
+    # my-openrouter:
+    #   base_url: "https://openrouter.ai/api/v1"
+    #   model: "anthropic/claude-3.5-sonnet"
+    #   timeout_seconds: 60
 
 extraction:
   llm_enabled: false
-  llm_adapter: "mock"
+  llm_adapter: "mock"  # set to "custom" or "provider:<name>" for real LLM enrichment
   batch_size: 15
   cache_ttl_days: 7
   budget_per_run_tokens: 50000
@@ -53,3 +71,6 @@ extraction:
 governance:
   rbac_enabled: false
   audit_retention_days: 90
+  audit_path: "./data/audit.jsonl"
+  jwt_secret: null
+  jwt_algorithm: "HS256"

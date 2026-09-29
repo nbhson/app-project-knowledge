@@ -2,36 +2,27 @@
 
 from __future__ import annotations
 
-import json
-
 from pkh.adapters.mock import MockAdapter
 from pkh.engines.context_delivery.models import ContextPackage
 
 
 class GPTAdapter(MockAdapter):
     def format_context(self, context: ContextPackage) -> str:
-        # Standard OpenAI chat format with model + messages per fix-plan 2.7
-        # Includes embedding_model TODO: vector._simple_embedding currently hash;
-        # TODO: replace hash with text-embedding-3-small when OPENAI_API_KEY set
-        # and settings.vector.embedding_model == "text-embedding-3-small"
-        return json.dumps(
+        # Human-readable like other adapters; structured chat payload is
+        # available via format_messages() for real OpenAI calls.
+        return super().format_context(context)
+
+    def format_messages(self, context: ContextPackage) -> list[dict]:
+        return [
             {
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a project knowledge assistant. "
-                            "Answer using only provided knowledge."
-                        ),
-                    },
-                    {"role": "user", "content": context.query},
-                    {"role": "assistant", "content": super().format_context(context)},
-                ],
-                "knowledge_count": len(context.knowledge),
+                "role": "system",
+                "content": (
+                    "You are a project knowledge assistant. Answer using only provided knowledge."
+                ),
             },
-            ensure_ascii=False,
-        )
+            {"role": "user", "content": context.query},
+            {"role": "assistant", "content": super().format_context(context)},
+        ]
 
     def adapt(self, context: ContextPackage, model_config: dict | None = None) -> str:
         return self.format_context(context)

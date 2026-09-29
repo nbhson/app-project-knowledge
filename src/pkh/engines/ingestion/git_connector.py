@@ -64,9 +64,12 @@ class GitConnector:
         elif local_path:
             self.local_path = Path(local_path)
         else:
-            # temp clone path
-            h = hashlib.md5(repo_url.encode()).hexdigest()[:8]
-            self.local_path = Path(f"/tmp/pkh_git_{h}")
+            # temp clone path — cross-platform via tempfile.gettempdir()
+            import tempfile
+
+            h = hashlib.md5(repo_url.encode(), usedforsecurity=False).hexdigest()[:8]
+            self.local_path = Path(tempfile.gettempdir()) / f"pkh_git_{h}"
+        self._file_cache: dict[str, RawItem] = {}
 
     async def connect(self) -> None:
         if self.local_path.exists() and (self.local_path / ".git").exists():
@@ -120,9 +123,19 @@ class GitConnector:
             )
 
         for f in files:
-            # skip hidden and cache
-            if any(part.startswith(".") for part in f.parts):
+            # skip cache/build artifacts; only skip well-known dirs, not any dotfile
+            parts = set(f.parts)
+            if (
+                ".git" in parts
+                or "__pycache__" in parts
+                or ".venv" in parts
+                or "node_modules" in parts
+            ):
                 continue
+            if f.name.startswith(".") and f.name not in (".gitignore",):
+                # skip hidden files like .env but keep .gitignore docs
+                if f.suffix == "":
+                    continue
             if "__pycache__" in str(f) or ".pyc" in f.suffix:
                 continue
             stat = await asyncio.to_thread(f.stat)
@@ -142,8 +155,9 @@ class GitConnector:
             rel = str(f.relative_to(self.local_path))
             ext = f.suffix.lower()
             lang = EXT_LANG_MAP.get(ext, "text")
-            # try to get last commit info
+            # try to get last commit info + commit time (avoid now() skew)
             commit_hash = ""
+            commit_time: datetime | None = None
             if self._is_git_repo():
                 try:
                     commit_hash = await _run(
@@ -151,6 +165,19 @@ class GitConnector:
                     )
                 except Exception:
                     commit_hash = ""
+                try:
+                    ts = await _run(
+                        ["git", "log", "-1", "--format=%ct", "--", rel], cwd=self.local_path
+                    )
+                    if ts.strip().isdigit():
+                        commit_time = datetime.fromtimestamp(int(ts.strip()), tz=timezone.utc)
+                except Exception:
+                    commit_time = None
+            if commit_time is None:
+                try:
+                    commit_time = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                except Exception:
+                    commit_time = datetime.now(timezone.utc)
             items.append(
                 RawItem(
                     item_id=rel,
@@ -165,12 +192,33 @@ class GitConnector:
                         "commit_hash": commit_hash,
                         "repo_url": self.repo_url,
                     },
-                    updated_at=datetime.now(timezone.utc),
+                    updated_at=commit_time,
                 )
             )
+        # populate single-item cache for O(1) get_item
+        self._file_cache = {it.item_id: it for it in items}
         return items
 
     async def get_item(self, item_id: str) -> RawItem:
+        # O(1) via cache; single-file read fallback (avoid full list_items scan)
+        if item_id in self._file_cache:
+            return self._file_cache[item_id]
+        f = self.local_path / item_id
+        if f.is_file():
+            try:
+                content = await asyncio.to_thread(f.read_text, encoding="utf-8", errors="ignore")
+                ext = f.suffix.lower()
+                return RawItem(
+                    item_id=item_id,
+                    source_type=SourceType.GIT.value,
+                    title=item_id,
+                    content=content,
+                    content_type=EXT_LANG_MAP.get(ext, "text"),
+                    metadata={"file_path": item_id, "repo_url": self.repo_url},
+                    updated_at=datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc),
+                )
+            except Exception as e:
+                raise SourceError(f"cannot read item {item_id}: {e}") from e
         items = await self.list_items()
         for it in items:
             if it.item_id == item_id:
@@ -179,8 +227,18 @@ class GitConnector:
 
     async def detect_changes(self, since: datetime) -> list[RawItem]:
         if not self._is_git_repo():
-            # fallback: return all
-            return await self.list_items()
+            # incremental via mtime filter (not full return-all)
+            all_items = await self.list_items()
+            result = []
+            for it in all_items:
+                try:
+                    p = self.local_path / it.item_id
+                    mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+                    if mtime > since:
+                        result.append(it)
+                except Exception:
+                    continue
+            return result
         since_str = since.strftime("%Y-%m-%d %H:%M:%S")
         try:
             out = await _run(

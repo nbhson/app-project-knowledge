@@ -18,15 +18,21 @@ class ContextValidator:
 
         # token check — unified with compressor: max(1, len//4)
         token_count = sum(max(1, len(c.content) // 4) for c in package.knowledge)
-        if token_count > max_tokens:
+        over_limit = token_count > max_tokens
+        if over_limit:
             warnings.append(f"Context exceeds model limit by {token_count - max_tokens} tokens")
 
-        # traceability
+        # traceability — hard failure
         missing = [c for c in package.knowledge if not c.sources]
         if missing:
             warnings.append(f"{len(missing)} chunks missing source references")
 
-        # lifecycle
+        # confidence range check
+        bad_conf = [c for c in package.knowledge if not (0.0 <= c.confidence <= 1.0)]
+        if bad_conf:
+            warnings.append(f"{len(bad_conf)} chunks have invalid confidence")
+
+        # lifecycle / low-conf are warnings only (do not invalidate)
         deprecated = [
             c for c in package.knowledge if str(c.lifecycle_state) in ("DEPRECATED", "ARCHIVED")
         ]
@@ -38,6 +44,5 @@ class ContextValidator:
         if low_conf:
             warnings.append(f"{len(low_conf)} low-confidence chunks included")
 
-        return ValidationResult(
-            valid=len(warnings) == 0, warnings=warnings, token_count=token_count
-        )
+        valid = not over_limit and not missing and not bad_conf
+        return ValidationResult(valid=valid, warnings=warnings, token_count=token_count)

@@ -61,7 +61,11 @@
 | `UPDATED` | `ACTIVE` | Re-validation passes | Updated content valid, no conflicts |
 | `SUPERSEDED` | `DEPRECATED` | Time-based retirement | 90 days since supersession |
 | `DEPRECATED` | `ARCHIVED` | Historical preservation | Compliance requirement or manual action |
-| `DEPRECATED` | `SUPERSEDED` | Re-activated by human | Human override with justification |
+
+> Note (2026-09): 13 valid transitions. `DEPRECATED -> SUPERSEDED` was removed
+> to avoid a cycle (see `src/pkh/models/lifecycle.py:12-25` and fix-plan 1.4).
+> `ACTIVE <-> UPDATED` ping-pong is guarded (max 5 consecutive UPDATED cycles).
+> Every transition appends to `properties._transition_history` (last 50).
 
 ---
 

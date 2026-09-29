@@ -16,6 +16,8 @@ logger = get_logger(__name__)
 
 
 class AuditLog:
+    MAX_BYTES = 10 * 1024 * 1024  # 10MB rotation
+
     def __init__(self, path: str | None = None):
         # path from config if not explicitly provided
         if path is None:
@@ -29,18 +31,41 @@ class AuditLog:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = FileLock(str(self.path) + ".lock")
+        self._cached_hash: str | None = None
+        self._cached_size: int = -1
 
     def _last_hash(self) -> str:
         if not self.path.exists():
             return "0" * 64
         try:
-            lines = self.path.read_text().strip().splitlines()
-            if not lines:
-                return "0" * 64
-            last = json.loads(lines[-1])
-            return last.get("hash", "0" * 64)
+            size = self.path.stat().st_size
+            if self._cached_hash is not None and size == self._cached_size:
+                return self._cached_hash
+            # read only last line (avoid O(N) full read for large logs)
+            with open(self.path, "rb") as f:
+                f.seek(max(0, size - 8192))
+                tail = f.read().decode("utf-8", errors="ignore").strip().splitlines()
+                if not tail:
+                    return "0" * 64
+                last = json.loads(tail[-1])
+                h = last.get("hash", "0" * 64)
+                self._cached_hash = h
+                self._cached_size = size
+                return h
         except Exception:
             return "0" * 64
+
+    def _maybe_rotate(self) -> None:
+        try:
+            if self.path.exists() and self.path.stat().st_size > self.MAX_BYTES:
+                backup = self.path.with_suffix(".jsonl.1")
+                if backup.exists():
+                    backup.unlink()
+                self.path.rename(backup)
+                self._cached_hash = None
+                self._cached_size = -1
+        except Exception as e:
+            logger.warning(f"Audit rotation failed: {e}")
 
     def log(
         self,
@@ -51,6 +76,7 @@ class AuditLog:
     ) -> dict:
         # filelock around append to prevent concurrent corrupt hash chain
         with self._lock:
+            self._maybe_rotate()
             prev_hash = self._last_hash()
             entry = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -65,6 +91,11 @@ class AuditLog:
             entry["hash"] = h
             with open(self.path, "a") as f:
                 f.write(json.dumps(entry) + "\n")
+            self._cached_hash = h
+            try:
+                self._cached_size = self.path.stat().st_size
+            except Exception:
+                pass
             logger.info(f"Audit: {action} by {actor} on {resource}")
             return entry
 

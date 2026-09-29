@@ -6,7 +6,10 @@ from __future__ import annotations
 class PKHError(Exception):
     """Base exception for all PKH errors."""
 
-    pass
+    def __init__(self, message: str = "", *, code: str = "", details: dict | None = None):
+        super().__init__(message)
+        self.code = code or self.__class__.__name__
+        self.details = details or {}
 
 
 class ValidationError(PKHError):
@@ -60,4 +63,17 @@ class GovernanceError(PKHError):
 class LifecycleError(PKHError):
     """Invalid lifecycle transitions."""
 
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        from_state: str | None = None,
+        to_state: str | None = None,
+    ):
+        super().__init__(
+            message,
+            code="LIFECYCLE_INVALID_TRANSITION",
+            details={"from_state": from_state, "to_state": to_state},
+        )
+        self.from_state = from_state
+        self.to_state = to_state

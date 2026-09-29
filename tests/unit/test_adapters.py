@@ -40,3 +40,36 @@ def test_get_adapter_types():
         a = get_adapter(name)
         assert a is not None
         assert a.get_token_limit() > 0
+        # all adapters must share the same text format contract
+        from pkh.engines.context_delivery.models import ContextPackage, SearchStats
+
+        sr = SourceReference(source_type=SourceType.GIT, source_id="x")
+        pkg = ContextPackage(
+            query="q",
+            knowledge=[],
+            relationships=[],
+            confidence=0.5,
+            sources=[sr],
+            lifecycle_states=[],
+            search_stats=SearchStats(),
+        )
+        assert isinstance(a.format_context(pkg), str)
+        assert isinstance(a.adapt(pkg), str)
+
+
+@pytest.mark.asyncio
+async def test_adapter_embed_consistency():
+    from pkh.storage.vector import _simple_embedding
+
+    a = get_adapter("mock")
+    vecs = await a.embed(["payment service handles credit card"])
+    assert len(vecs) == 1 and len(vecs[0]) == 256
+    # semantic overlap: payment query closer to payment doc than auth doc
+    q = _simple_embedding("payment credit card")
+    p = _simple_embedding("Payment service handles credit card processing")
+    au = _simple_embedding("Auth service handles authentication login")
+
+    def cos(x, y):
+        return sum(a * b for a, b in zip(x, y, strict=True))
+
+    assert cos(q, p) > cos(q, au)

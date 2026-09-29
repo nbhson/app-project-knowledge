@@ -58,28 +58,28 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "C4", "UP"]
-ignore = []
+select = ["E", "F", "W", "I", "B", "C4", "UP", "S", "N", "DTZ"]
+ignore = ["S101", "S106", "S110", "S112", "S607", "S108"]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 warn_return_any = false
 warn_unused_configs = true
 ignore_missing_imports = true
 show_error_codes = true
 
+# SQLAlchemy Column typing is noisy infra; keep strict everywhere else.
+# (Previously also ignored sync_manager + audit; those are now strict.)
 [[tool.mypy.overrides]]
 module = [
     "pkh.storage.metadata",
     "pkh.storage.vector",
     "pkh.storage.unified",
     "pkh.storage.graph",
-    "pkh.engines.ingestion.sync_manager",
-    "pkh.governance.audit",
 ]
 ignore_errors = true
 
@@ -88,5 +88,4 @@ source = ["src/pkh"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 55
-omit = ["src/pkh/cli/*"]
+fail_under = 70

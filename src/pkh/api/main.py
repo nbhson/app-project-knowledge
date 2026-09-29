@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,17 +11,14 @@ from pydantic import BaseModel, field_validator
 from pkh.adapters import get_adapter
 from pkh.api.auth import get_current_role, require_permission
 from pkh.config.settings import get_settings
-from pkh.engines.context_delivery.assembler import ContextAssembler
-from pkh.engines.context_delivery.compressor import compress
-from pkh.engines.context_delivery.models import SearchStats
-from pkh.engines.context_delivery.validator import ContextValidator
 from pkh.engines.extraction.pipeline import ExtractionPipeline
+from pkh.engines.ingestion.confluence_connector import ConfluenceConnector
+from pkh.engines.ingestion.document_connector import DocumentConnector
 from pkh.engines.ingestion.git_connector import GitConnector
+from pkh.engines.ingestion.jira_connector import JiraConnector
 from pkh.engines.ingestion.sync_manager import SyncManager
-from pkh.engines.retrieval.intent import QueryPlanner, classify_intent
-from pkh.engines.retrieval.reranker import deduplicate, rerank
-from pkh.engines.retrieval.retriever import HybridRetriever
 from pkh.governance.audit import AuditLog
+from pkh.services.query import run_query_pipeline
 from pkh.storage.unified import KnowledgeStore
 from pkh.utils.logging import get_logger, setup_logging
 
@@ -120,11 +116,14 @@ class QueryRequest(BaseModel):
     query: str
     top_k: int = 5
     strategy: str | None = None
+    provider: str | None = None
+    model: str | None = None
 
 
 class ContextRequest(BaseModel):
     query: str
     top_k: int = 5
+    provider: str | None = None
 
 
 @app.get("/health")
@@ -184,19 +183,40 @@ async def ingest(req: IngestRequest, role: str = Depends(require_permission("ing
     store = get_store()
     all_kos = []
     for src in sources:
-        # parse source url
+        # parse source url — support all 4 schemes like CLI
+        conn: object
         if src.startswith("git://"):
-            path = src[6:]
-            conn = GitConnector(repo_url=path)
-            mgr = SyncManager([conn])
-            items = await mgr.collect_all()
+            git_path = src[6:]
+            conn = GitConnector(repo_url=git_path)
+        elif src.startswith("confluence://"):
+            space = src[len("confluence://") :]
+            conn = ConfluenceConnector(
+                base_url=settings.sources.confluence.url, spaces=[space] if space else []
+            )
+        elif src.startswith("jira://"):
+            proj = src[len("jira://") :]
+            conn = JiraConnector(
+                base_url=settings.sources.jira.url, projects=[proj] if proj else []
+            )
+        elif src.startswith("document://"):
+            doc_path = src[len("document://") :]
+            conn = DocumentConnector(paths=[doc_path])
         else:
             # treat as git local
             conn = GitConnector(repo_url=src)
-            mgr = SyncManager([conn])
-            items = await mgr.collect_all()
+        mgr = SyncManager([conn])  # type: ignore[list-item]
+        items = await mgr.collect_all()
 
-        pipeline = ExtractionPipeline(llm_enabled=settings.extraction.llm_enabled)
+        pipeline = ExtractionPipeline(
+            llm_enabled=settings.extraction.llm_enabled,
+            llm_adapter=(
+                get_adapter(settings.extraction.llm_adapter)
+                if settings.extraction.llm_enabled
+                else None
+            ),
+            budget_tokens=settings.extraction.budget_per_run_tokens,
+            batch_size=settings.extraction.batch_size,
+        )
         kos, stats = await pipeline.run(items)
         # Transition via state machine to ACTIVE for querying
         from pkh.models.knowledge import LifecycleState
@@ -207,24 +227,24 @@ async def ingest(req: IngestRequest, role: str = Depends(require_permission("ing
             cur = ko.lifecycle_state
             try:
                 if cur == LifecycleState.DISCOVERED:
-                    ko = lifecycle_transition(ko, LifecycleState.EXTRACTED)
-                    ko = lifecycle_transition(ko, LifecycleState.VALIDATING)
-                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
+                    ko = lifecycle_transition(ko, LifecycleState.EXTRACTED, reason="ingest")
+                    ko = lifecycle_transition(ko, LifecycleState.VALIDATING, reason="ingest")
+                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE, reason="ingest")
                 elif cur == LifecycleState.EXTRACTED:
-                    ko = lifecycle_transition(ko, LifecycleState.VALIDATING)
-                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
+                    ko = lifecycle_transition(ko, LifecycleState.VALIDATING, reason="ingest")
+                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE, reason="ingest")
                 elif cur == LifecycleState.VALIDATING:
-                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE)
-            except Exception:
-                # if transition fails, keep original but force ACTIVE for MVP querying
-                ko.lifecycle_state = LifecycleState.ACTIVE
+                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE, reason="ingest")
+            except Exception as e:
+                # do not cheat state-machine: keep original state and log
+                logger.warning(f"Lifecycle transition failed for {ko.id}: {e}")
             transitioned.append(ko)
         kos = transitioned
         await store.save(kos)
         all_kos.extend(kos)
 
     audit = AuditLog()
-    audit.log("ingest", resource=",".join(sources), details={"count": len(all_kos)})
+    audit.log("ingest", actor=role, resource=",".join(sources), details={"count": len(all_kos)})
     return {"ingested": len(all_kos), "sources": sources}
 
 
@@ -238,58 +258,30 @@ async def ingest_status():
 @app.post("/query")
 async def query(req: QueryRequest, role: str = Depends(require_permission("query"))):
     store = get_store()
-    intent = classify_intent(req.query)
-    planner = QueryPlanner()
-    sub_queries = planner.plan(req.query, intent)
-    retriever = HybridRetriever(store)
-    all_fused: list[tuple] = []
-    stats_total: dict[str, int] = {}
-    start = time.time()
-    for sq in sub_queries:
-        fused, stats = await retriever.retrieve(sq, top_k=req.top_k)
-        all_fused.extend(fused)
-        for k, v in stats.items():
-            stats_total[k] = stats_total.get(k, 0) + v
+    package, search_stats, intent = await run_query_pipeline(store, req.query, top_k=req.top_k)
 
-    # deduplicate and rerank
-    all_fused = deduplicate(all_fused)
-    all_fused = rerank(all_fused)
+    # format answer via adapter (custom provider supported; key stays server-side)
+    from pkh.utils.exceptions import AdapterError, ConfigurationError
 
-    # filter ACTIVE etc
-    # only keep ACTIVE/UPDATED by default
-    active = [
-        p for p in all_fused if p[0].lifecycle_state.value in ("ACTIVE", "UPDATED", "EXTRACTED")
-    ]
-    if not active:
-        active = all_fused
-
-    # assemble context
-    assembler = ContextAssembler(store)
-    search_stats = SearchStats(
-        vector_results=stats_total.get("vector", 0),
-        keyword_results=stats_total.get("keyword", 0),
-        graph_results=stats_total.get("graph", 0),
-        total_before_dedup=len(all_fused),
-        total_after_dedup=len(active),
-        strategies_used=list(stats_total.keys()),
-        latency_ms=(time.time() - start) * 1000,
-    )
-    package = await assembler.assemble(
-        req.query, active[: req.top_k], intent=intent, search_stats=search_stats
-    )
-    package = compress(package)
-    validator = ContextValidator()
-    vr = validator.validate(package)
-    if vr.warnings:
-        package.warnings.extend([w for w in vr.warnings if w not in package.warnings])
-
-    # format answer via adapter
     settings = get_settings()
-    adapter = get_adapter(settings.adapters.default)
-    answer = await adapter.complete(package)
+    try:
+        adapter = get_adapter(
+            req.provider or settings.adapters.default,
+            model=req.model,
+        )
+        answer = await adapter.complete(package)
+    except ConfigurationError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except AdapterError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
     audit = AuditLog()
-    audit.log("query", resource=req.query, details={"intent": intent.value, "top_k": req.top_k})
+    audit.log(
+        "query",
+        actor=role,
+        resource=req.query,
+        details={"intent": intent.value, "top_k": req.top_k},
+    )
 
     return {
         "query": req.query,
@@ -303,25 +295,37 @@ async def query(req: QueryRequest, role: str = Depends(require_permission("query
 @app.post("/context")
 async def context(req: ContextRequest, role: str = Depends(require_permission("context"))):
     store = get_store()
-    intent = classify_intent(req.query)
-    retriever = HybridRetriever(store)
-    fused, stats = await retriever.retrieve(req.query, top_k=req.top_k)
-    fused = deduplicate(fused)
-    fused = rerank(fused)
-    assembler = ContextAssembler(store)
-    search_stats = SearchStats(
-        vector_results=stats.get("vector", 0),
-        keyword_results=stats.get("keyword", 0),
-        graph_results=stats.get("graph", 0),
-        total_before_dedup=len(fused),
-        total_after_dedup=len(fused),
-        strategies_used=list(stats.keys()),
-    )
-    package = await assembler.assemble(
-        req.query, fused[: req.top_k], intent=intent, search_stats=search_stats
-    )
-    package = compress(package)
+    package, _, _ = await run_query_pipeline(store, req.query, top_k=req.top_k)
     return package.model_dump(mode="json")
+
+
+@app.get("/providers")
+async def providers():
+    """List configured LLM providers (secrets redacted)."""
+    settings = get_settings()
+    out: dict[str, dict] = {}
+    for name, p in settings.adapters.providers.items():
+        out[name] = {
+            "base_url": p.base_url,
+            "model": p.model,
+            "embedding_model": p.embedding_model,
+            "has_api_key": bool(p.api_key or __import__("os").getenv("OPENAI_API_KEY")),
+            "timeout_seconds": p.timeout_seconds,
+        }
+    if settings.adapters.custom_base_url or settings.adapters.custom_model:
+        out.setdefault(
+            "custom",
+            {
+                "base_url": settings.adapters.custom_base_url,
+                "model": settings.adapters.custom_model,
+                "embedding_model": settings.adapters.custom_embedding_model,
+                "has_api_key": bool(
+                    settings.adapters.custom_api_key or __import__("os").getenv("OPENAI_API_KEY")
+                ),
+                "timeout_seconds": 60.0,
+            },
+        )
+    return {"default": settings.adapters.default, "providers": out}
 
 
 @app.get("/knowledge/{id}")
@@ -336,8 +340,9 @@ async def get_knowledge(id: str):
 @app.get("/graph/explore")
 async def graph_explore(entity_id: str, depth: int = 2):
     store = get_store()
+    depth = max(1, min(int(depth), 5))
     neighbors = store.graph.get_neighbors(entity_id, max_depth=depth)
-    return {"entity_id": entity_id, "neighbors": neighbors, "depth": depth}
+    return {"entity_id": entity_id, "neighbors": neighbors[:100], "depth": depth}
 
 
 @app.get("/sources/status")

@@ -114,6 +114,16 @@ class KnowledgeStore:
                 break
 
         for row in all_rows:
+            # retry counter via error field: "retries=N; ..." — give up after 5
+            err_text = row.error or ""
+            retries = 0
+            if "retries=" in err_text:
+                try:
+                    retries = int(err_text.split("retries=")[1].split(";")[0].strip())
+                except Exception:
+                    retries = 0
+            if retries >= 5:
+                continue
             # DELETE op: remove from derived stores
             if row.op == "DELETE":
                 try:
@@ -122,7 +132,11 @@ class KnowledgeStore:
                     await asyncio.to_thread(self.metadata.mark_outbox_done, row.id)
                     reconciled += 1
                 except Exception as e:
-                    await asyncio.to_thread(self.metadata.mark_outbox_failed, row.id, str(e))
+                    await asyncio.to_thread(
+                        self.metadata.mark_outbox_failed,
+                        row.id,
+                        f"retries={retries + 1}; {e}",
+                    )
                 continue
             # UPSERT op: reload KO from metadata truth and upsert derived
             ko = await asyncio.to_thread(self.metadata.get, row.knowledge_id)
@@ -136,7 +150,9 @@ class KnowledgeStore:
                 await asyncio.to_thread(self.metadata.mark_outbox_done, row.id)
                 reconciled += 1
             except Exception as e:
-                await asyncio.to_thread(self.metadata.mark_outbox_failed, row.id, str(e))
+                await asyncio.to_thread(
+                    self.metadata.mark_outbox_failed, row.id, f"retries={retries + 1}; {e}"
+                )
         return reconciled
 
     async def nightly_check(self) -> dict[str, Any]:
@@ -151,11 +167,12 @@ class KnowledgeStore:
         metadata_count = await asyncio.to_thread(self.metadata.count)
         vector_count = await self.vector.count()
         graph_nodes = await self.graph.count_nodes()
-        # drift ratios
+        # drift ratios — 5% threshold to avoid false alerts on small datasets
+        # (50 items, delete 1 => 2% drift should NOT alert)
         denom = max(1, metadata_count)
         drift_vector = abs(metadata_count - vector_count) / denom
         drift_graph = abs(metadata_count - graph_nodes) / denom
-        needs_rebuild = drift_vector > 0.01 or drift_graph > 0.01
+        needs_rebuild = drift_vector > 0.05 or drift_graph > 0.05
         return {
             "metadata_count": metadata_count,
             "vector_count": vector_count,
@@ -177,17 +194,29 @@ class KnowledgeStore:
         self, query: str, filters: dict[str, Any] | None = None, top_k: int = 10
     ) -> list[KnowledgeObject]:
         filters = filters or {}
-        # Try vector first, fallback to metadata
+        # Hybrid: merge vector + metadata keyword, dedup by id, vector first
+        vector_kos: list[KnowledgeObject] = []
         try:
             vector_results = await self.vector.query(query, top_k=top_k, filters=filters)
-            if vector_results:
-                return [ko for ko, _score in vector_results]
+            vector_kos = [ko for ko, _score in vector_results]
         except Exception as e:
             logger.warning(f"Vector search failed, fallback to metadata: {e}")
-        # metadata keyword search (offload blocking DB)
-        return await asyncio.to_thread(
-            lambda: self.metadata.query(filters={"query": query, **filters}, limit=top_k)
-        )
+        try:
+            meta_kos: list[KnowledgeObject] = await asyncio.to_thread(
+                lambda: self.metadata.query(filters={"query": query, **filters}, limit=top_k)
+            )
+        except Exception as e:
+            logger.warning(f"Metadata search failed: {e}")
+            meta_kos = []
+        if vector_kos and meta_kos:
+            seen: set[str] = set()
+            merged: list[KnowledgeObject] = []
+            for ko in (*vector_kos, *meta_kos):
+                if ko.id not in seen:
+                    seen.add(ko.id)
+                    merged.append(ko)
+            return merged[:top_k]
+        return vector_kos or meta_kos
 
     async def get_by_source(self, source_id: str) -> list[KnowledgeObject]:
         return await asyncio.to_thread(self.metadata.get_by_source, source_id)

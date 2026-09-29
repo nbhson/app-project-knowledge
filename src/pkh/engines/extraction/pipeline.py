@@ -90,6 +90,7 @@ class ExtractionPipeline:
 
     async def run(self, items: list[RawItem]) -> tuple[list[KnowledgeObject], dict[str, Any]]:
         start = time.time()
+        self._tokens_used = 0
         all_kos: list[KnowledgeObject] = []
         stats = ExtractionStats()
         stats.inputs_processed = len(items)
@@ -117,8 +118,12 @@ class ExtractionPipeline:
             self._cache[cache_key] = (time.time(), kos)
             all_kos.extend(kos)
 
-        # Pass 3: confidence calibration (simple: boost rule-based, demote low)
-        # Already assigned in extractors.
+        # Pass 3: confidence calibration — clamp + demote unreviewed rule output
+        for ko in all_kos:
+            if ko.object_type.value == "RELATIONSHIP" and ko.confidence > 0.9:
+                ko.confidence = 0.9
+            if ko.object_type.value == "RULE" and ko.confidence > 0.75:
+                ko.confidence = 0.7
 
         stats.entities_extracted = sum(1 for k in all_kos if k.object_type.value == "ENTITY")
         stats.relationships_extracted = sum(

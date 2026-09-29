@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 from pkh.models.knowledge import (
@@ -18,23 +17,100 @@ from pkh.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _simple_embedding(text: str, dim: int = 64) -> list[float]:
-    # deterministic hash-based embedding for MVP without openai
-    # TODO: respect settings.vector.embedding_model when OPENAI_API_KEY set
-    #   -> replace hash with text-embedding-3-small via openai embeddings API
-    #   Keep hash fallback when embedding_model == "hash" or no API key.
-    h = hashlib.sha256(text.encode()).digest()
-    # expand
-    vals = []
-    for i in range(dim):
-        vals.append((h[i % len(h)] / 255.0) * 2 - 1)
-    # normalize
-    norm = sum(v * v for v in vals) ** 0.5 or 1.0
-    return [v / norm for v in vals]
+def _tokenize(text: str) -> list[str]:
+    import re
+
+    tokens = re.findall(r"[a-zA-Z0-9_]+", text.lower())
+    # split camelCase / snake_case for better overlap
+    parts: list[str] = []
+    for tok in tokens:
+        parts.append(tok)
+        # camel split: paymentService -> payment, service
+        sub = re.sub(r"([a-z])([A-Z])", r"\1 \2", tok).lower().split()
+        parts.extend(sub)
+        parts.extend(tok.split("_"))
+    return [p for p in parts if len(p) > 1]
+
+
+def _simple_embedding(text: str, dim: int = 256) -> list[float]:
+    """Deterministic TF hashing-trick embedding (semantic-lite, no API key).
+
+    Each token hashes to an index; cosine then reflects token overlap
+    (much better than SHA256-of-whole-text which gives ~0 for paraphrases).
+    Respects settings.vector.embedding_model when an OpenAI key is set
+    (see ChromaVectorStore.upsert); falls back to this when offline.
+    """
+    import hashlib
+
+    vec = [0.0] * dim
+    for tok in _tokenize(text):
+        h = int(hashlib.md5(tok.encode(), usedforsecurity=False).hexdigest(), 16)
+        vec[h % dim] += 1.0
+        # bigram continuity bonus via second hash
+        vec[(h >> 16) % dim] += 0.3
+    norm = sum(v * v for v in vec) ** 0.5 or 1.0
+    return [v / norm for v in vec]
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b, strict=True))
+
+
+def _reconstruct_ko(
+    ko_id: str, md: dict[str, Any], doc: str, emb: list[float] | None = None
+) -> tuple[KnowledgeObject, list[float]] | None:
+    """Rebuild minimal KO from Chroma metadata+document. Returns (ko, embedding)."""
+    try:
+        entity_type_val = md.get("entity_type") or ""
+        entity_type = EntityType(entity_type_val) if entity_type_val else None
+    except Exception:
+        entity_type = None
+    ls_val = md.get("lifecycle_state") or LifecycleState.ACTIVE.value
+    try:
+        LifecycleState(ls_val)
+    except Exception:
+        ls_val = LifecycleState.ACTIVE.value
+    confidence = md.get("confidence", 0.5)
+    try:
+        confidence = float(confidence)
+    except Exception:
+        confidence = 0.5
+    title = md.get("title") or ko_id
+    content = doc or title
+    sr = SourceReference(source_type=SourceType.GIT, source_id="reconciled", url=None)
+    try:
+        ko_kwargs: dict[str, Any] = {
+            "id": ko_id,
+            "title": title,
+            "content": content,
+            "source_references": [sr],
+            "confidence": max(0.0, min(1.0, confidence)),
+            "lifecycle_state": LifecycleState(ls_val),
+            "object_type": ObjectType.ENTITY,
+            "entity_type": entity_type or EntityType.FILE,
+        }
+        ko = KnowledgeObject(**ko_kwargs)
+    except Exception:
+        return None
+    text = f"{ko.title} {ko.description or ''} {ko.content}"
+    embedding = list(emb) if emb is not None else _simple_embedding(text)
+    return ko, embedding
+
+
+def _fallback_entry(ko_id: str, ko: KnowledgeObject, embedding: list[float]) -> dict[str, Any]:
+    text = f"{ko.title} {ko.description or ''} {ko.content}"
+    return {
+        "id": ko_id,
+        "embedding": embedding,
+        "content": text,
+        "metadata": {
+            "entity_type": ko.entity_type.value if ko.entity_type else "",
+            "lifecycle_state": ko.lifecycle_state.value,
+            "confidence": ko.confidence,
+            "title": ko.title,
+        },
+        "ko": ko,
+    }
 
 
 class InMemoryVectorStore:
@@ -132,62 +208,11 @@ class ChromaVectorStore:
                 md = metadatas[idx] if idx < len(metadatas) and metadatas[idx] is not None else {}
                 doc = documents[idx] if idx < len(documents) and documents[idx] is not None else ""
                 emb = embeddings[idx] if idx < len(embeddings) else None
-                # Reconstruct minimal KO from stored metadata/document
-                try:
-                    entity_type_val = md.get("entity_type") or ""
-                    entity_type = EntityType(entity_type_val) if entity_type_val else None
-                except Exception:
-                    entity_type = None
-                try:
-                    ls_val = md.get("lifecycle_state") or LifecycleState.ACTIVE.value
-                    LifecycleState(ls_val)
-                except Exception:
-                    ls_val = LifecycleState.ACTIVE.value
-                confidence = (
-                    float(md.get("confidence", 0.5))
-                    if isinstance(md.get("confidence"), (int, float, str))
-                    else 0.5
-                )
-                title = md.get("title") or ko_id
-                content = doc or title
-                # need at least one source_reference; use placeholder that
-                # reconciles later via metadata store
-                sr = SourceReference(source_type=SourceType.GIT, source_id="reconciled", url=None)
-                try:
-                    ko_kwargs: dict[str, Any] = {
-                        "id": ko_id,
-                        "title": title,
-                        "content": content,
-                        "source_references": [sr],
-                        "confidence": max(0.0, min(1.0, confidence)),
-                        "lifecycle_state": LifecycleState(ls_val),
-                    }
-                    # object_type required; default ENTITY if entity_type present else ENTITY
-                    ko_kwargs["object_type"] = ObjectType.ENTITY
-                    if entity_type is not None:
-                        ko_kwargs["entity_type"] = entity_type
-                    else:
-                        # choose FILE as generic ENTITY type when unknown
-                        ko_kwargs["entity_type"] = EntityType.FILE
-                    ko = KnowledgeObject(**ko_kwargs)
-                except Exception:
+                rebuilt = _reconstruct_ko(ko_id, md, doc, list(emb) if emb is not None else None)
+                if rebuilt is None:
                     continue
-                text = f"{ko.title} {ko.description or ''} {ko.content}"
-                if emb is None:
-                    emb = _simple_embedding(text)
-                # Store in fallback format compatible with InMemoryVectorStore.query
-                self._fallback.store[ko_id] = {
-                    "id": ko_id,
-                    "embedding": list(emb) if emb is not None else _simple_embedding(text),
-                    "content": text,
-                    "metadata": {
-                        "entity_type": entity_type.value if entity_type else "",
-                        "lifecycle_state": ls_val,
-                        "confidence": confidence,
-                        "title": title,
-                    },
-                    "ko": ko,
-                }
+                ko, embedding = rebuilt
+                self._fallback.store[ko_id] = _fallback_entry(ko_id, ko, embedding)
             if ids:
                 logger.info(f"Vector reconcile: warmed {len(ids)} ids into fallback cache")
         except Exception as e:
@@ -221,6 +246,35 @@ class ChromaVectorStore:
             await self._fallback.upsert(ko, idempotency_key)
         except Exception as e:
             logger.warning(f"Fallback upsert after Chroma success failed: {e}")
+
+    async def upsert_many_batched(self, kos: list[KnowledgeObject]) -> None:
+        if self._use_fallback or self._collection is None:
+            for ko in kos:
+                await self._fallback.upsert(ko)
+            return
+        # batch Chroma upsert to avoid N roundtrips
+        ids, embs, mds, docs = [], [], [], []
+        for ko in kos:
+            text = f"{ko.title} {ko.description or ''} {ko.content}"
+            ids.append(ko.id)
+            embs.append(_simple_embedding(text))
+            mds.append(
+                {
+                    "entity_type": ko.entity_type.value if ko.entity_type else "",
+                    "lifecycle_state": ko.lifecycle_state.value,
+                    "confidence": ko.confidence,
+                    "title": ko.title,
+                }
+            )
+            docs.append(text)
+        try:
+            self._collection.upsert(ids=ids, embeddings=embs, metadatas=mds, documents=docs)
+            for ko in kos:
+                await self._fallback.upsert(ko)
+        except Exception as e:
+            logger.warning(f"Chroma batch upsert failed, fallback per-item: {e}")
+            for ko in kos:
+                await self.upsert(ko)
 
     async def upsert_many(self, kos: list[KnowledgeObject]) -> None:
         for ko in kos:
@@ -275,64 +329,16 @@ class ChromaVectorStore:
                 if entry is not None:
                     ko = entry["ko"]
                 else:
-                    # Fallback miss (e.g., after restart before reconcile or external write)
-                    # Reconstruct minimal KO from Chroma metadata+document
                     doc = (
                         documents[idx]
                         if idx < len(documents) and documents[idx] is not None
                         else ""
                     )
-                    try:
-                        entity_type_val = md.get("entity_type") or ""
-                        entity_type = EntityType(entity_type_val) if entity_type_val else None
-                    except Exception:
-                        entity_type = None
-                    ls_val = md.get("lifecycle_state") or LifecycleState.ACTIVE.value
-                    try:
-                        LifecycleState(ls_val)
-                    except Exception:
-                        ls_val = LifecycleState.ACTIVE.value
-                    confidence = (
-                        float(md.get("confidence", 0.5))
-                        if isinstance(md.get("confidence"), (int, float, str))
-                        else 0.5
-                    )
-                    title = md.get("title") or ko_id
-                    content = doc or title
-                    sr = SourceReference(
-                        source_type=SourceType.GIT, source_id="reconciled", url=None
-                    )
-                    try:
-                        ko_kwargs2: dict[str, Any] = {
-                            "id": ko_id,
-                            "title": title,
-                            "content": content,
-                            "source_references": [sr],
-                            "confidence": max(0.0, min(1.0, confidence)),
-                            "lifecycle_state": LifecycleState(ls_val),
-                            "object_type": ObjectType.ENTITY,
-                        }
-                        if entity_type is not None:
-                            ko_kwargs2["entity_type"] = entity_type
-                        else:
-                            ko_kwargs2["entity_type"] = EntityType.FILE
-                        ko = KnowledgeObject(**ko_kwargs2)
-                    except Exception:
+                    rebuilt = _reconstruct_ko(ko_id, md, doc, None)
+                    if rebuilt is None:
                         continue
-                    # Warm fallback for next time
-                    text = f"{ko.title} {ko.description or ''} {ko.content}"
-                    self._fallback.store[ko_id] = {
-                        "id": ko_id,
-                        "embedding": _simple_embedding(text),
-                        "content": text,
-                        "metadata": {
-                            "entity_type": entity_type.value if entity_type else "",
-                            "lifecycle_state": ls_val,
-                            "confidence": confidence,
-                            "title": title,
-                        },
-                        "ko": ko,
-                    }
+                    ko, embedding = rebuilt
+                    self._fallback.store[ko_id] = _fallback_entry(ko_id, ko, embedding)
                 scored.append((ko, score))
 
             # Distances already sorted ascending => scores descending, but re-sort for filter cases
@@ -347,8 +353,8 @@ class ChromaVectorStore:
             return await self._fallback.delete(ids)
         try:
             self._collection.delete(ids=ids)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Chroma delete failed for {ids}: {e}")
         await self._fallback.delete(ids)
 
     async def count(self) -> int:

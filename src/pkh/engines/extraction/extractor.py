@@ -27,11 +27,13 @@ def _deterministic_id(source_id: str, kind: str, name: str) -> str:
 
 
 def _make_source_ref(item: RawItem) -> SourceReference:
-    st = item.source_type
+    st = str(item.source_type or "").strip().upper()
     try:
         source_type = SourceType(st)
     except Exception:
-        source_type = SourceType.GIT if st == "GIT" else SourceType.DOCUMENT
+        # case-insensitive fallback for all known types
+        mapping = {t.value.upper(): t for t in SourceType}
+        source_type = mapping.get(st, SourceType.DOCUMENT)
     return SourceReference(
         source_type=source_type,
         source_id=item.item_id,
@@ -59,6 +61,9 @@ def extract_from_code(code_output: CodeKnowledgeOutput, item: RawItem) -> list[K
         # map METHOD -> METHOD still valid, else use mapping
         if ent.kind == "METHOD":
             et = EntityType.METHOD
+        # calibrated confidence: documented code > bare signature
+        has_docs = bool(ent.documentation and ent.documentation.strip())
+        confidence = 0.95 if has_docs else 0.85
         kos.append(
             KnowledgeObject(
                 id=_deterministic_id(item.item_id, f"ENTITY:{ent.kind}", ent.name),
@@ -71,7 +76,7 @@ def extract_from_code(code_output: CodeKnowledgeOutput, item: RawItem) -> list[K
                     f"File: {ent.file_path}:{ent.line_start}-{ent.line_end}"
                 ),
                 source_references=[ref],
-                confidence=1.0,
+                confidence=confidence,
                 properties={
                     "file_path": ent.file_path,
                     "line_start": ent.line_start,
@@ -100,25 +105,48 @@ def extract_from_code(code_output: CodeKnowledgeOutput, item: RawItem) -> list[K
         )
     )
 
-    # relationships as KnowledgeObjects
+    # relationships as KnowledgeObjects — use KO ids for graph linkage
+    # Build name->KO-id map from entities just created + file entity id
+    name_to_id: dict[str, str] = {}
+    for ko in kos:
+        if ko.object_type == ObjectType.ENTITY:
+            name_to_id[ko.title] = ko.id
+    file_ko_id = _deterministic_id(item.item_id, "ENTITY:FILE", item.item_id)
     for rel in code_output.relationships:
         # relationships stored as RULE? Actually object_type RELATIONSHIP
         try:
             rt = RelationshipType(rel.type)
         except Exception:
             rt = RelationshipType.RELATED_TO
+        from_id = name_to_id.get(rel.from_entity, rel.from_entity)
+        to_id = name_to_id.get(rel.to_entity, rel.to_entity)
+        # calibrated: parser CALLS/DEPENDS are heuristic -> 0.8, explicit EXTENDS -> 0.9
+        rel_conf = (
+            0.9 if rt in (RelationshipType.EXTENDS,) else min(0.85, float(rel.confidence or 0.8))
+        )
         kos.append(
             KnowledgeObject(
                 id=_deterministic_id(
                     item.item_id, "RELATIONSHIP", f"{rel.from_entity}:{rt.value}:{rel.to_entity}"
                 ),
                 object_type=ObjectType.RELATIONSHIP,
+                relationship_type=rt,
+                source_id=from_id,
+                target_id=to_id,
                 title=f"{rel.from_entity} {rt.value} {rel.to_entity}",
                 description=f"{rel.type} from {rel.from_entity} to {rel.to_entity}",
                 content=f"{rel.from_entity} --{rel.type}--> {rel.to_entity}",
                 source_references=[ref],
-                confidence=rel.confidence,
-                properties={"from": rel.from_entity, "to": rel.to_entity, "rel_type": rel.type},
+                confidence=rel_conf,
+                properties={
+                    "from": from_id,
+                    "to": to_id,
+                    "from_name": rel.from_entity,
+                    "to_name": rel.to_entity,
+                    "rel_type": rel.type,
+                    "relationship_type": rt.value,
+                    "file_id": file_ko_id,
+                },
             )
         )
     return kos
@@ -217,18 +245,35 @@ def extract_from_document(item: RawItem) -> list[KnowledgeObject]:
             )
 
     # Trace references: JIRA-123, ADR-001 — cap 5
-    jira_refs = re.findall(r"[A-Z]+-\d+", content)
-    for j in set(jira_refs[:5]):
+    # Require 2-10 uppercase letters to avoid README-123 / A-1 false positives
+    trace_blocklist = {"README", "CHANGELOG", "VERSION", "TODO", "FIXME"}
+    jira_refs = re.findall(r"\b([A-Z]{2,10}-\d{1,6})\b", content)
+    seen_refs: list[str] = []
+    for j in jira_refs:
+        prefix = j.split("-")[0]
+        if prefix in trace_blocklist:
+            continue
+        if j not in seen_refs:
+            seen_refs.append(j)
+    for j in seen_refs[:5]:
         kos.append(
             KnowledgeObject(
                 id=_deterministic_id(item.item_id, "RELATIONSHIP:TRACES_TO", j),
                 object_type=ObjectType.RELATIONSHIP,
+                relationship_type=RelationshipType.TRACES_TO,
+                source_id=_deterministic_id(item.item_id, "ENTITY:DOCUMENT", item.title),
+                target_id=j,
                 title=f"{item.title} TRACES_TO {j}",
                 description=f"References {j}",
                 content=f"{item.title} traces to {j}",
                 source_references=[ref],
                 confidence=0.8,
-                properties={"from": item.item_id, "to": j, "rel_type": "TRACES_TO"},
+                properties={
+                    "from": item.item_id,
+                    "to": j,
+                    "rel_type": "TRACES_TO",
+                    "relationship_type": "TRACES_TO",
+                },
             )
         )
 

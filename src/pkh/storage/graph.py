@@ -19,6 +19,7 @@ class GraphStore:
         self.persist_path = Path(persist_path)
         self.persist_path.parent.mkdir(parents=True, exist_ok=True)
         self.graph = nx.DiGraph()
+        self._dirty = False
         self._load()
 
     def _load(self) -> None:
@@ -37,6 +38,11 @@ class GraphStore:
         except Exception as e:
             logger.warning(f"Failed to persist graph: {e}")
 
+    async def _persist_if_dirty(self) -> None:
+        if self._dirty:
+            self._dirty = False
+            await self._persist()
+
     async def add_node(self, ko: KnowledgeObject) -> None:
         self.graph.add_node(
             ko.id,
@@ -46,47 +52,94 @@ class GraphStore:
             confidence=ko.confidence,
             properties=ko.properties,
         )
+        self._dirty = True
         await self._persist()
 
     async def upsert(self, ko: KnowledgeObject, idempotency_key: str | None = None) -> None:
         # if relationship type, add edge; else add node
+        # prefer typed fields source_id/target_id/relationship_type (new),
+        # fallback to legacy properties from/to/rel_type
         if ko.object_type.value == "RELATIONSHIP":
-            from_id = ko.properties.get("from") or ko.properties.get("from_id")
-            to_id = ko.properties.get("to") or ko.properties.get("to_id")
+            from_id = ko.source_id or ko.properties.get("from") or ko.properties.get("from_id")
+            to_id = ko.target_id or ko.properties.get("to") or ko.properties.get("to_id")
             rel_type = (
-                ko.properties.get("rel_type")
+                (ko.relationship_type.value if ko.relationship_type else None)
+                or ko.properties.get("rel_type")
                 or ko.properties.get("relationship_type")
                 or "RELATED_TO"
             )
             if from_id and to_id:
-                # ensure nodes exist
+                # ensure nodes exist with informative label (not bare UNKNOWN
+                # when from/to are KO ids); if ids are plain names, keep them
+                # as nodes but mark origin so get_neighbors on KO ids works
+                # when extractor uses KO ids (fixed in extractor.py).
                 if from_id not in self.graph:
-                    self.graph.add_node(from_id, label="UNKNOWN")
+                    self.graph.add_node(from_id, label="ENTITY_REF", title=str(from_id))
                 if to_id not in self.graph:
-                    self.graph.add_node(to_id, label="UNKNOWN")
+                    self.graph.add_node(to_id, label="ENTITY_REF", title=str(to_id))
                 self.graph.add_edge(
                     from_id, to_id, relation=rel_type, confidence=ko.confidence, id=ko.id
                 )
         else:
             await self.add_node(ko)
             return
+        self._dirty = True
         await self._persist()
 
     async def upsert_many(self, kos: list[KnowledgeObject]) -> None:
         for ko in kos:
-            await self.upsert(ko)
+            # inline without per-item persist
+            if ko.object_type.value == "RELATIONSHIP":
+                from_id = ko.source_id or ko.properties.get("from") or ko.properties.get("from_id")
+                to_id = ko.target_id or ko.properties.get("to") or ko.properties.get("to_id")
+                rel_type = (
+                    (ko.relationship_type.value if ko.relationship_type else None)
+                    or ko.properties.get("rel_type")
+                    or ko.properties.get("relationship_type")
+                    or "RELATED_TO"
+                )
+                if from_id and to_id:
+                    if from_id not in self.graph:
+                        self.graph.add_node(from_id, label="ENTITY_REF", title=str(from_id))
+                    if to_id not in self.graph:
+                        self.graph.add_node(to_id, label="ENTITY_REF", title=str(to_id))
+                    self.graph.add_edge(
+                        from_id, to_id, relation=rel_type, confidence=ko.confidence, id=ko.id
+                    )
+            else:
+                self.graph.add_node(
+                    ko.id,
+                    label=ko.entity_type.value if ko.entity_type else ko.object_type.value,
+                    title=ko.title,
+                    lifecycle_state=ko.lifecycle_state.value,
+                    confidence=ko.confidence,
+                    properties=ko.properties,
+                )
+        self._dirty = True
+        await self._persist()
 
     async def add_edge(
         self, from_id: str, to_id: str, relation: str, confidence: float = 1.0
     ) -> None:
         self.graph.add_edge(from_id, to_id, relation=relation, confidence=confidence)
+        self._dirty = True
         await self._persist()
+
+    def get_edge(self, from_id: str, to_id: str) -> dict | None:
+        """Public accessor to avoid callers touching .graph directly."""
+        if self.graph.has_edge(from_id, to_id):
+            return dict(self.graph.get_edge_data(from_id, to_id) or {})
+        return None
+
+    def has_edge(self, from_id: str, to_id: str) -> bool:
+        return self.graph.has_edge(from_id, to_id)
 
     def get_neighbors(
         self, entity_id: str, relationship_types: list[str] | None = None, max_depth: int = 1
     ) -> list[str]:
         if entity_id not in self.graph:
             return []
+        max_depth = max(1, min(int(max_depth), 5))
         # BFS
         visited = set()
         frontier = {entity_id}

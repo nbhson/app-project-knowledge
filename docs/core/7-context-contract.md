@@ -89,17 +89,27 @@ The ContextPackage is the canonical format. Each model adapter converts it to th
 ```python
 class ModelAdapter(Protocol):
     """Interface for converting ContextPackage to model-specific format."""
-    
-    def adapt(self, context: ContextPackage, model_config: dict) -> str:
+
+    async def complete(
+        self, context: ContextPackage, model_config: dict | None = None
+    ) -> str: ...
+    def format_context(self, context: ContextPackage) -> str:
         """Convert ContextPackage to model-ready prompt/text."""
         ...
-    
+
+    # adapt is alias of format_context (backwards compat)
+    def adapt(self, context: ContextPackage, model_config: dict | None = None) -> str: ...
+
     def parse_response(self, response: str) -> dict:
         """Parse model response back into structured format (optional)."""
         ...
-    
-    def get_token_limit(self, model_config: dict) -> int:
+
+    def get_token_limit(self, model_config: dict | None = None) -> int:
         """Return max context tokens for this model."""
+        ...
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Optional embedding hook (default: local hashing-trick)."""
         ...
 ```
 

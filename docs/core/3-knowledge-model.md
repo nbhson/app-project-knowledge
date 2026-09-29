@@ -26,22 +26,28 @@ Every piece of knowledge in the system is a `KnowledgeObject`:
 ```python
 class KnowledgeObject(BaseModel):
     """The fundamental unit of knowledge in the system."""
-    
+
     # Identity
-    id: str                              # UUID v4, globally unique
+    id: str                              # UUID v4 by default; uuid5 deterministic via
+                                         # deterministic_id(source_id:kind:name) for dedup
     object_type: ObjectType              # ENTITY | RELATIONSHIP | DECISION | RULE
-    
+    entity_type: EntityType | None       # required when ENTITY
+    relationship_type: RelationshipType | None  # backfilled from properties.rel_type
+    source_id: str | None                # source KO id when RELATIONSHIP
+    target_id: str | None                # target KO id when RELATIONSHIP
+
     # Content
-    title: str                           # Human-readable name
-    description: str = ""                # Free-text description
-    content: str = ""                    # Full text content (for vector indexing)
-    
+    title: str                           # Human-readable name (1-500 chars)
+    description: str | None = None       # Free-text description
+    content: str                         # Full text (1-50000 chars, for vector indexing)
+
     # Source of Truth
     source_references: list[SourceReference]  # ALWAYS non-empty
-    
+
     # Confidence
-    confidence: float = 1.0              # 0.0 - 1.0, set by extraction engine
-    
+    confidence: float = 0.5              # 0.0 - 1.0; calibrated per extractor
+                                         # (code 0.85/0.95, ADR 0.9, heading 0.7, rule 0.6-0.7)
+
     # Lifecycle
     lifecycle_state: LifecycleState = LifecycleState.DISCOVERED
     

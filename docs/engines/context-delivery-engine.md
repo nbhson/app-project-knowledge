@@ -172,17 +172,27 @@ Interface for converting ContextPackage to model-specific format:
 ```python
 class ModelAdapter(Protocol):
     """Interface for converting ContextPackage to model-specific format."""
-    
-    def adapt(self, context: ContextPackage, model_config: dict) -> str:
+
+    async def complete(
+        self, context: ContextPackage, model_config: dict | None = None
+    ) -> str: ...
+    def format_context(self, context: ContextPackage) -> str:
         """Convert ContextPackage to model-ready prompt/text."""
         ...
-    
+
+    # adapt is alias of format_context (backwards compat)
+    def adapt(self, context: ContextPackage, model_config: dict | None = None) -> str: ...
+
     def parse_response(self, response: str) -> dict:
         """Parse model response back into structured format (optional)."""
         ...
-    
-    def get_token_limit(self, model_config: dict) -> int:
+
+    def get_token_limit(self, model_config: dict | None = None) -> int:
         """Return max context tokens for this model."""
+        ...
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Optional embedding hook (default: local hashing-trick)."""
         ...
 ```
 
@@ -192,7 +202,7 @@ class ModelAdapter(Protocol):
 | **GPT** | `GPTAdapter` | JSON instructions + messages | Structured output via JSON mode; tools for source references |
 | **Gemini** | `GeminiAdapter` | Text with examples | Google-style prompting; multi-turn conversation support |
 | **Local LLM** | `LocalLLMAdapter` | Plain text | No structured output; best-effort formatting |
-| **Custom** | `CustomAdapter` | Configurable | Plugin system for any model format |
+| **Custom (OpenAI-compatible)** | `OpenAICompatibleAdapter` (`custom`, alias `CustomAdapter`, `src/pkh/adapters/custom.py`) | `POST {base_url}/chat/completions` + `/embeddings` | `base_url + model + api_key`; named `adapters.providers.<name>`; key via env; raises `AdapterError` on failure, never silent-mocks |
 
 ---
 
@@ -214,6 +224,17 @@ context_delivery:
       local:
         class: LocalLLMAdapter
         base_url: http://localhost:11434/v1
+```
+
+> Note: adapter selection thực tế là top-level `adapters:` (xem `config/settings.yaml.example`
+> và `docs/decisions/adr-004-llm-adapter.md`). Custom provider ví dụ:
+> `adapters.default: "my-ollama"` + `adapters.providers.my-ollama: {base_url, model, api_key}`.
+
+## Shared Query Pipeline
+
+CLI (`pkh query`/`pkh context`) và API (`POST /query`) dùng chung
+`src/pkh/services/query.py::run_query_pipeline` (classify → plan → retrieve →
+dedup → rerank → assemble → compress → validate) để tránh triple-duplication.
   
   compression:
     max_tokens: 128000        # Claude Sonnet context window

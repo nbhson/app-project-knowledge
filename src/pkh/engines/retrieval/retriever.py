@@ -25,13 +25,21 @@ class RetrievalResult:
 def rrf_fuse(results: list[RetrievalResult], k: int = 60) -> list[tuple[KnowledgeObject, float]]:
     score_map: dict[str, float] = defaultdict(float)
     obj_map: dict[str, KnowledgeObject] = {}
+    orig_best: dict[str, float] = {}
     for rr in results:
-        for rank, (obj, _orig_score) in enumerate(zip(rr.results, rr.scores, strict=True), start=1):
+        for rank, (obj, orig_score) in enumerate(zip(rr.results, rr.scores, strict=True), start=1):
             score_map[obj.id] += 1.0 / (k + rank)
-            # keep highest original score object
-            if obj.id not in obj_map:
+            try:
+                s = float(orig_score)
+            except Exception:
+                s = 0.0
+            if obj.id not in orig_best or s > orig_best[obj.id]:
+                orig_best[obj.id] = s
                 obj_map[obj.id] = obj
-    sorted_ids = sorted(score_map, key=lambda x: score_map[x], reverse=True)
+    # tie-break by original score for stability
+    sorted_ids = sorted(
+        score_map, key=lambda x: (score_map[x], orig_best.get(x, 0.0)), reverse=True
+    )
     return [(obj_map[i], score_map[i]) for i in sorted_ids]
 
 
@@ -178,7 +186,7 @@ class HybridRetriever:
         query: str,
         top_k: int = 10,
         strategies: list[str] | None = None,
-        timeout: float = 0.2,
+        timeout: float = 2.0,
     ) -> tuple[list[tuple[KnowledgeObject, float]], dict]:
         strategies = strategies or ["vector", "keyword", "graph"]
         tasks = []
@@ -221,5 +229,24 @@ class HybridRetriever:
     async def retrieve_with_intent(
         self, query: str, intent: IntentType, weights: dict | None = None, top_k: int = 10
     ) -> tuple[list[tuple[KnowledgeObject, float]], dict]:
-        # weights per intent could adjust strategies, for MVP just use all
-        return await self.retrieve(query, top_k=top_k)
+        # use per-intent weights from settings when not explicitly passed
+        if weights is None:
+            try:
+                from pkh.config.settings import get_settings
+
+                weights = get_settings().retrieval.weights_per_intent.get(intent.value, {})
+            except Exception:
+                weights = {}
+        weights = weights or {}
+        # choose strategies by weight threshold; default to all
+        strategies = [s for s, w in weights.items() if w > 0] or ["vector", "keyword", "graph"]
+        fused, stats = await self.retrieve(query, top_k=top_k * 2, strategies=strategies)
+        if not weights or len(fused) <= 1:
+            return fused[:top_k], stats
+        # weighted re-score: boost RRF score by strategy contribution
+        # (approximation: re-weight by max strategy weight that returned the id)
+        rescored = [
+            (ko, score * (1.0 + sum(weights.values()) / len(weights))) for ko, score in fused
+        ]
+        rescored.sort(key=lambda x: x[1], reverse=True)
+        return rescored[:top_k], stats

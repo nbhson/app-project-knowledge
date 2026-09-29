@@ -93,4 +93,4 @@ async def test_graph_neighbors(tmp_path):
     )
     await store.save(rel)
     neigh = await store.get_relationships(ko_a.id)
-    assert ko_b.id in neigh or len(neigh) >= 0  # at least no crash
+    assert ko_b.id in neigh, f"expected {ko_b.id} in neighbors, got {neigh}"

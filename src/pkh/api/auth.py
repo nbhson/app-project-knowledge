@@ -8,7 +8,7 @@ from pkh.config.settings import get_settings
 
 ROLES = {
     "ADMIN": {"ingest", "query", "context", "graph", "audit", "health"},
-    "ARCHITECT": {"query", "context", "graph", "audit", "health"},
+    "ARCHITECT": {"ingest", "query", "context", "graph", "audit", "health"},
     "DEVELOPER": {"query", "context", "graph", "ingest", "health"},
     "VIEWER": {"query", "context", "health"},
     "SERVICE": {"query", "context", "health"},
@@ -39,8 +39,13 @@ def get_current_role(
             if secret:
                 payload = jwt.decode(token, secret, algorithms=[algorithm])
             else:
-                # insecure fallback for tests: get unverified claims
-                payload = jwt.get_unverified_claims(token)
+                # fail-closed: RBAC enabled without secret is a misconfiguration
+                raise HTTPException(
+                    status_code=500,
+                    detail="RBAC enabled but jwt_secret not configured (fail-closed)",
+                )
+        except HTTPException:
+            raise
         except Exception as e:  # JWTError
             raise HTTPException(status_code=401, detail=f"Invalid token: {e}") from e
         role = (
