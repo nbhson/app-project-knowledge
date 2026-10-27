@@ -12,6 +12,7 @@ build/
 htmlcov/
 data/
 *.db
+*.sqlite3
 chroma/
 .env
 config/settings.yaml
