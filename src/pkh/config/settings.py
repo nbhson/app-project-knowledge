@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import threading
+import warnings
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -292,6 +293,65 @@ def resolve_provider_api_key(
     return None
 
 
+# PKH_* env vars consumed outside the Settings model (keep in sync with users).
+_KNOWN_FREEFORM_PKH_VARS = {"PKH_CUSTOM_API_KEY"}  # -> resolve_provider_api_key
+
+
+def _pkh_env_key_known(model: type[BaseModel], parts: list[str]) -> bool:
+    """Resolve a lower-cased env key path against a (nested) settings model.
+
+    Returns True if the path maps to a real field. dict-typed fields accept
+    arbitrary keys, so any remainder after a dict field is considered known.
+    """
+    fields = model.model_fields
+    head = parts[0]
+    field_name = next((name for name in fields if name.lower() == head), None)
+    if field_name is None:
+        return False
+    if len(parts) == 1:
+        return True
+    ann = fields[field_name].annotation
+    # unwrap Optional[...] / | None
+    if get_origin(ann) is Union:
+        args = [a for a in get_args(ann) if a is not type(None)]
+        if len(args) != 1:
+            return False
+        ann = args[0]
+    if get_origin(ann) is dict:
+        return True  # mapping fields accept arbitrary keys (e.g. adapters.providers.<name>)
+    if isinstance(ann, type) and issubclass(ann, BaseModel):
+        return _pkh_env_key_known(ann, parts[1:])
+    return False
+
+
+def warn_unknown_pkh_env_vars() -> None:
+    """Warn about PKH_* env vars that do not resolve to any settings field.
+
+    With env_prefix="PKH_" and extra="ignore" (SettingsConfigDict), a typo like
+    PKH_ADAPTERS__CUSTM_API_KEY is silently dropped and the default is used.
+    This warns so misconfiguration is visible. First-level segment comparison is
+    case-insensitive, matching pydantic-settings env resolution.
+    """
+    unknown: list[str] = []
+    for env_name in sorted(os.environ):
+        if not env_name.startswith("PKH_"):
+            continue
+        parts = [p.lower() for p in env_name[4:].split("__") if p]
+        if not parts:
+            continue
+        if env_name in _KNOWN_FREEFORM_PKH_VARS:
+            continue
+        if not _pkh_env_key_known(Settings, parts):
+            unknown.append(env_name)
+    if unknown:
+        warnings.warn(
+            f"Unrecognized PKH_* environment variable(s) will be ignored "
+            f"(check for typos): {', '.join(unknown)}",
+            UserWarning,
+            stacklevel=2,
+        )
+
+
 _settings: Settings | None = None
 _settings_key: tuple[str | None, str | None] | None = None
 _settings_lock = threading.Lock()
@@ -310,6 +370,7 @@ def get_settings(yaml_path: str | Path | None = None, reload: bool = False) -> S
             else:
                 _settings = Settings.load()
             _settings_key = key
+            warn_unknown_pkh_env_vars()
         return _settings
 
 
