@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from pkh.utils.exceptions import ConfigurationError
@@ -182,6 +182,22 @@ class GovernanceConfig(BaseModel):
     audit_path: str = "./data/audit.jsonl"
     jwt_secret: str | None = None
     jwt_algorithm: str = "HS256"
+
+    @model_validator(mode="after")
+    def _rbac_requires_jwt_secret(self) -> GovernanceConfig:
+        """Fail fast at startup when RBAC/JWT auth is enabled without a secret.
+
+        The API also fails closed per-request (pkh/api/auth.py), but that only
+        triggers on the first authenticated request; validating here surfaces
+        the misconfiguration at process start instead of mid-request.
+        """
+        if self.rbac_enabled and not (self.jwt_secret or "").strip():
+            raise ValueError(
+                "governance.rbac_enabled=true requires governance.jwt_secret to be set "
+                "(env: PKH_GOVERNANCE__JWT_SECRET, or governance.jwt_secret in settings YAML). "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+        return self
 
 
 class Settings(BaseSettings):
