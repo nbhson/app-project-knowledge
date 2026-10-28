@@ -116,6 +116,11 @@ class ExtractionPipeline:
                 continue
 
             self._cache[cache_key] = (time.time(), kos)
+            # Bound cache: một /ingest với corpus lớn giữ TẤT CẢ items trong RAM
+            # (dict mọc vô hạn trước đây) — evict entry cũ nhất khi vượt cap.
+            if len(self._cache) > 500:
+                oldest = min(self._cache, key=lambda k: self._cache[k][0])
+                del self._cache[oldest]
             all_kos.extend(kos)
 
         # Pass 3: confidence calibration — clamp + demote unreviewed rule output

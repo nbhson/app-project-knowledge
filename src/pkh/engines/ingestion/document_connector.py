@@ -110,6 +110,13 @@ class DocumentConnector:
             if not base.exists():
                 continue
             files = [f for f in base.rglob("*") if f.is_file() and self._matches(f)]
+            # Warn khi truncate (trước đây im lặng — user không biết 2000+ files
+            # chỉ ingest một phần).
+            if len(files) > 2000:
+                logger.warning(
+                    f"DocumentConnector: {len(files)} files match but only the "
+                    f"first 2000 will be ingested (base={base})"
+                )
             # concurrent reads to avoid blocking loop
             results = await asyncio.gather(*[_read_file(f) for f in files[:2000]])
             items.extend([r for r in results if r is not None])

@@ -16,6 +16,22 @@ from pkh.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+_GIT_CACHE: dict[str, str] = {}
+
+
+def _git() -> str:
+    """Lazy-resolved git binary path (module import phải không raise để CLI/API
+    vẫn boot được khi git vắng mặt — chỉ connector này cần nó)."""
+    if "path" not in _GIT_CACHE:
+        import shutil
+
+        resolved = shutil.which("git")
+        if not resolved:
+            raise SourceError("git binary not found in PATH — install git to use the git connector")
+        _GIT_CACHE["path"] = resolved
+    return _GIT_CACHE["path"]
+
+
 async def _run(cmd: list[str], cwd: Path | None = None) -> str:
     result = await asyncio.to_thread(
         subprocess.run, cmd, capture_output=True, text=True, cwd=cwd, timeout=30
@@ -74,7 +90,7 @@ class GitConnector:
     async def connect(self) -> None:
         if self.local_path.exists() and (self.local_path / ".git").exists():
             try:
-                await _run(["git", "pull", "origin", self.branch], cwd=self.local_path)
+                await _run([_git(), "pull", "origin", self.branch], cwd=self.local_path)
                 logger.info(f"Pulled {self.repo_url} branch {self.branch}")
             except Exception as e:
                 logger.warning(f"git pull failed: {e}")
@@ -84,7 +100,7 @@ class GitConnector:
         else:
             # clone
             if self.repo_url.startswith("http") or self.repo_url.startswith("git@"):
-                cmd = ["git", "clone", "--branch", self.branch]
+                cmd = [_git(), "clone", "--branch", self.branch]
                 if self.shallow:
                     cmd.extend(["--depth", "1"])
                 cmd.extend([self.repo_url, str(self.local_path)])
@@ -113,7 +129,7 @@ class GitConnector:
                 )
                 files = [self.local_path / f for f in out.splitlines() if f.strip()]
             except Exception:
-                out = await _run(["git", "ls-files"], cwd=self.local_path)
+                out = await _run([_git(), "ls-files"], cwd=self.local_path)
                 files = [self.local_path / f for f in out.splitlines() if f.strip()]
         else:
             files = await asyncio.to_thread(
@@ -161,13 +177,13 @@ class GitConnector:
             if self._is_git_repo():
                 try:
                     commit_hash = await _run(
-                        ["git", "log", "-1", "--format=%H", "--", rel], cwd=self.local_path
+                        [_git(), "log", "-1", "--format=%H", "--", rel], cwd=self.local_path
                     )
                 except Exception:
                     commit_hash = ""
                 try:
                     ts = await _run(
-                        ["git", "log", "-1", "--format=%ct", "--", rel], cwd=self.local_path
+                        [_git(), "log", "-1", "--format=%ct", "--", rel], cwd=self.local_path
                     )
                     if ts.strip().isdigit():
                         commit_time = datetime.fromtimestamp(int(ts.strip()), tz=timezone.utc)
@@ -242,7 +258,7 @@ class GitConnector:
         since_str = since.strftime("%Y-%m-%d %H:%M:%S")
         try:
             out = await _run(
-                ["git", "log", f"--since={since_str}", "--name-only", "--pretty=format:"],
+                [_git(), "log", f"--since={since_str}", "--name-only", "--pretty=format:"],
                 cwd=self.local_path,
             )
             changed = {line.strip() for line in out.splitlines() if line.strip()}

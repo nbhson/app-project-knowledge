@@ -75,13 +75,35 @@ class ConfluenceConnector:
 
     # ----------------------------------------------------------------- helpers
     @staticmethod
+    def _html_to_text(html_str: str) -> str:
+        """Strip HTML tags + entities thành plain text.
+
+        Confluence `body.storage` là HTML raw từ bất kỳ ai có quyền edit page —
+        lưu nguyên văn rồi /query echo lại verbatim = stored XSS với mọi
+        consumer render kết quả. Lấy text-only (tags stripped, entities decoded)
+        là đủ cho retrieval pipeline.
+        """
+        import html
+        import re
+
+        # Block-level tags -> newline để text không dính liền
+        text = re.sub(r"(?i)<(?:br|/p|/div|/li|/h[1-6]|/tr)[^>]*>", "\n", html_str)
+        # Bỏ toàn bộ tag còn lại
+        text = re.sub(r"<[^>]+>", " ", text)
+        # Decode entities (&amp; &lt; &lt;script&gt; ...)
+        text = html.unescape(text)
+        return re.sub(r"[ \t]+", " ", re.sub(r"\n{3,}", "\n\n", text)).strip()
+
+    @staticmethod
     def _page_to_raw(page: dict[str, Any], space: str) -> RawItem:
         return RawItem(
             item_id=str(page.get("id")),
             source_type=SourceType.CONFLUENCE.value,
             title=page.get("title", ""),
-            content=page.get("body", {}).get("storage", {}).get("value", ""),
-            content_type="html",
+            content=ConfluenceConnector._html_to_text(
+                page.get("body", {}).get("storage", {}).get("value", "")
+            ),
+            content_type="text",
             metadata={
                 "space": space,
                 "version": page.get("version", {}).get("number"),

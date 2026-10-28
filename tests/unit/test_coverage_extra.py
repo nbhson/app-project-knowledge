@@ -126,13 +126,14 @@ def test_pipeline_budget_and_jira_dispatch():
 
 
 def test_reranker_old_recency_and_dedup():
-    from pkh.engines.retrieval.reranker import _content_fingerprint, _dedupe_key, recency_score
+    # _dedupe_key removed (dead code, used builtin hash() non-deterministic);
+    # dedup goes through _content_fingerprint only.
+    from pkh.engines.retrieval.reranker import _content_fingerprint, recency_score
 
     old = datetime.now(timezone.utc) - timedelta(days=120)
     assert recency_score(old) == 0.1
     assert recency_score(datetime.now(timezone.utc) - timedelta(days=60)) == 0.4
     ko = _ko()
-    assert isinstance(_dedupe_key(ko), str)
     assert isinstance(_content_fingerprint(ko), str)
 
 

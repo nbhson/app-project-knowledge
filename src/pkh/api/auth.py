@@ -5,6 +5,9 @@ from __future__ import annotations
 from fastapi import Depends, Header, HTTPException
 
 from pkh.config.settings import get_settings
+from pkh.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 ROLES = {
     "ADMIN": {"ingest", "query", "context", "graph", "audit", "health"},
@@ -47,7 +50,9 @@ def get_current_role(
         except HTTPException:
             raise
         except Exception as e:  # JWTError
-            raise HTTPException(status_code=401, detail=f"Invalid token: {e}") from e
+            # str(e) của JWT lib có thể echo token segments/claims — generic message.
+            logger.warning(f"JWT validation failed: {e}")
+            raise HTTPException(status_code=401, detail="Invalid token") from e
         role = (
             payload.get("role") or payload.get("roles") or payload.get("preferred_role") or "VIEWER"
         )

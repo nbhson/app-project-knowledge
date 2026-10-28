@@ -55,20 +55,6 @@ def rerank(
     return reranked
 
 
-def _dedupe_key(ko: KnowledgeObject) -> str:
-    """Deterministic fingerprint for dedup.
-
-    Uses id when deterministic (uuid5), but falls back to content
-    fingerprint to catch duplicates even when ids are random uuid4.
-    """
-    # primary: id, secondary: title+content+entity_type (lower, stripped)
-    # Ensures dedup triggers regardless of UUID randomness.
-    t = ko.title.strip().lower()
-    c = ko.content.strip().lower()
-    content_fp = f"{t}|{c}|{ko.entity_type}|{ko.object_type}"
-    return f"{ko.id}::{hash(content_fp)}"
-
-
 def _content_fingerprint(ko: KnowledgeObject) -> str:
     t = ko.title.strip().lower()
     c = ko.content.strip().lower()[:500]

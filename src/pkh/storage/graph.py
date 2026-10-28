@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import networkx as nx
@@ -34,7 +35,11 @@ class GraphStore:
         try:
             data = nx.node_link_data(self.graph)
             text = json.dumps(data)
-            await asyncio.to_thread(self.persist_path.write_text, text)
+            # Atomic write: crash giữa write_text trực tiếp lên graph.json trước
+            # đây corrupt cả store — tmp + os.replace là nguyên tử trên POSIX.
+            tmp = self.persist_path.with_suffix(".json.tmp")
+            await asyncio.to_thread(tmp.write_text, text)
+            await asyncio.to_thread(os.replace, tmp, self.persist_path)
         except Exception as e:
             logger.warning(f"Failed to persist graph: {e}")
 

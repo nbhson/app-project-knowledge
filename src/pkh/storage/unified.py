@@ -13,7 +13,6 @@ from pkh.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-
 class KnowledgeStore:
     def __init__(
         self,
@@ -24,6 +23,13 @@ class KnowledgeStore:
         self.metadata = MetadataStore(sqlite_path=metadata_path)
         self.vector = ChromaVectorStore(path=vector_path)
         self.graph = GraphStore(persist_path=graph_path)
+
+    def close(self) -> None:
+        """Dispose resources on shutdown (SQLite engine, Chroma client)."""
+        try:
+            self.metadata.engine.dispose()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"metadata engine dispose: {e}")
 
     async def save(self, knowledge: KnowledgeObject | list[KnowledgeObject]) -> None:
         if isinstance(knowledge, KnowledgeObject):

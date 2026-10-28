@@ -19,6 +19,7 @@ from sqlalchemy import (
     func,
     or_,
     select,
+    update,
 )
 from sqlalchemy.orm import Session, declarative_base
 
@@ -209,25 +210,32 @@ class MetadataStore:
             # Push text filter to DB via ILIKE before limit/offset (fixes pagination + O(N))
             if "query" in filters and filters["query"]:
                 q = filters["query"]
-                # escape % and _ for LIKE pattern
+                # escape % and _ for LIKE pattern — PHẢI khai báo escape="\\"
+                # (trước đây chỉ chèn \%\_ nhưng không có ESCAPE clause → escaping
+                # inert, % vẫn là wildcard sống).
                 q_escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                 pattern = f"%{q_escaped}%"
                 stmt = stmt.where(
                     or_(
-                        KnowledgeRow.title.ilike(pattern),
-                        KnowledgeRow.content.ilike(pattern),
-                        KnowledgeRow.description.ilike(pattern),
+                        KnowledgeRow.title.ilike(pattern, escape="\\"),
+                        KnowledgeRow.content.ilike(pattern, escape="\\"),
+                        KnowledgeRow.description.ilike(pattern, escape="\\"),
                     )
                 )
             # Push source_type filter to DB (JSON field -> LIKE on serialized JSON)
             # Primary filter in SQL, python post-filter kept only for precise JSON validation
             if "source_type" in filters:
-                st = filters["source_type"]
-                # JSON stored as TEXT; filter via LIKE for DB-side reduction
-                # e.g. source_references contains '"source_type": "GIT"'
-                st_escaped = st.replace('"', '""')
+                st = str(filters["source_type"])
+                # JSON stored as TEXT; filter via LIKE for DB-side reduction.
+                # Escape LIKE wildcards: user-controlled % / _ trước đây hoạt động
+                # như wildcard → filter bypass / scan rộng bất ngờ.
+                st_escaped = (
+                    st.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace('"', '""')
+                )
                 stmt = stmt.where(
-                    KnowledgeRow.source_references.like(f'%"source_type": "{st_escaped}"%')
+                    KnowledgeRow.source_references.like(
+                        f'%"source_type": "{st_escaped}"%', escape="\\"
+                    )
                 )
             # Apply limit/offset in DB (correct pagination)
             stmt = stmt.limit(limit).offset(offset)
@@ -246,9 +254,16 @@ class MetadataStore:
     def get_by_source(self, source_id: str) -> list[KnowledgeObject]:
         with Session(self.engine) as session:
             # DB-side filter via LIKE on JSON to avoid full scan O(N)
-            sid_escaped = source_id.replace('"', '""')
+            sid_escaped = (
+                source_id.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+                .replace('"', '""')
+            )
             stmt = select(KnowledgeRow).where(
-                KnowledgeRow.source_references.like(f'%"source_id": "{sid_escaped}"%')
+                KnowledgeRow.source_references.like(
+                    f'%"source_id": "{sid_escaped}"%', escape="\\"
+                )
             )
             rows = session.execute(stmt).scalars().all()
             result = []
@@ -279,21 +294,43 @@ class MetadataStore:
             return session.execute(select(func.count()).select_from(KnowledgeRow)).scalar_one()
 
     def claim_outbox(self, batch: int = 100) -> list[OutboxRow]:
+        # Atomic claim với claim-token: UPDATE PENDING->CLAIMED kèm token ngẫu
+        # nhiên trong payload, rồi SELECT theo token trong cùng transaction —
+        # worker khác không bao giờ nhận trùng rows (trước đây SELECT PENDING
+        # thuần: 2 worker chạy đồng thời claim TRÙNG rows, SQLite không có
+        # FOR UPDATE SKIP LOCKED). Token lưu trong payload.claim — không cần
+        # migrate schema.
+        token = uuid.uuid4().hex
         with Session(self.engine) as session:
-            # ORDER BY created_at ensures FIFO; handles concurrent claim via
-            # LIMIT batch + WHERE status='PENDING' ORDER BY created_at.
-            # Prod PostgreSQL would add FOR UPDATE SKIP LOCKED to avoid
-            # concurrent workers double-claiming; SQLite emulation omits it.
+            session.execute(
+                update(OutboxRow)
+                .where(
+                    OutboxRow.status == "PENDING",
+                    OutboxRow.id.in_(
+                        select(OutboxRow.id)
+                        .where(OutboxRow.status == "PENDING")
+                        .order_by(OutboxRow.created_at)
+                        .limit(batch)
+                    ),
+                )
+                .values(status="CLAIMED", payload={"claim": token})
+            )
             rows = (
                 session.execute(
-                    select(OutboxRow)
-                    .where(OutboxRow.status == "PENDING")
-                    .order_by(OutboxRow.created_at)
-                    .limit(batch)
+                    select(OutboxRow).where(
+                        OutboxRow.status == "CLAIMED",
+                        OutboxRow.payload["claim"].as_string() == token,
+                    )
                 )
                 .scalars()
                 .all()
             )
+            # Expunge trước commit: expire_on_commit mặc định True — commit
+            # expire attributes của rows còn attached, caller truy cập attribute
+            # sau khi session đóng → DetachedInstanceError.
+            for r in rows:
+                session.expunge(r)
+            session.commit()
             return rows
 
     def mark_outbox_done(self, outbox_id: str) -> None:

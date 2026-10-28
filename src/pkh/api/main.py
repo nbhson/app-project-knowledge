@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -55,7 +57,15 @@ async def lifespan(app: FastAPI):
     _store = _create_store()
     _store_key = key
     yield
-    # do not clear _store on shutdown to avoid recreation issues; keep singleton
+    # Shutdown: dispose engines/clients (SQLite engine, Chroma client) — trước
+    # đây store sống sót qua shutdown, giữ file handles + Chroma client mở.
+    if _store is not None:
+        try:
+            _store.close()
+        except Exception as e:
+            logger.warning(f"store close on shutdown: {e}")
+        _store = None
+        _store_key = None
 
 
 app = FastAPI(
@@ -244,7 +254,10 @@ async def ingest(req: IngestRequest, role: str = Depends(require_permission("ing
         all_kos.extend(kos)
 
     audit = AuditLog()
-    audit.log("ingest", actor=role, resource=",".join(sources), details={"count": len(all_kos)})
+    # Blocking disk I/O trong async handler block event loop — wrap to_thread.
+    await asyncio.to_thread(
+        audit.log, "ingest", actor=role, resource=",".join(sources), details={"count": len(all_kos)}
+    )
     return {"ingested": len(all_kos), "sources": sources}
 
 
@@ -271,12 +284,17 @@ async def query(req: QueryRequest, role: str = Depends(require_permission("query
         )
         answer = await adapter.complete(package)
     except ConfigurationError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        # str(e) của AdapterError/ConfigurationError nhúng upstream URL + status
+        # + ≤500 ký tự response body — KHÔNG trả client; chỉ log server-side.
+        logger.warning(f"adapter configuration error: {e}")
+        raise HTTPException(status_code=400, detail="LLM provider is not configured correctly") from e
     except AdapterError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+        logger.error(f"adapter error: {e}")
+        raise HTTPException(status_code=502, detail="Upstream LLM provider failed") from e
 
     audit = AuditLog()
-    audit.log(
+    await asyncio.to_thread(
+        audit.log,
         "query",
         actor=role,
         resource=req.query,
@@ -309,7 +327,7 @@ async def providers():
             "base_url": p.base_url,
             "model": p.model,
             "embedding_model": p.embedding_model,
-            "has_api_key": bool(p.api_key or __import__("os").getenv("OPENAI_API_KEY")),
+            "has_api_key": bool(p.api_key or os.getenv("OPENAI_API_KEY")),
             "timeout_seconds": p.timeout_seconds,
         }
     if settings.adapters.custom_base_url or settings.adapters.custom_model:
@@ -320,7 +338,7 @@ async def providers():
                 "model": settings.adapters.custom_model,
                 "embedding_model": settings.adapters.custom_embedding_model,
                 "has_api_key": bool(
-                    settings.adapters.custom_api_key or __import__("os").getenv("OPENAI_API_KEY")
+                    settings.adapters.custom_api_key or os.getenv("OPENAI_API_KEY")
                 ),
                 "timeout_seconds": 60.0,
             },
@@ -341,7 +359,11 @@ async def get_knowledge(id: str):
 async def graph_explore(entity_id: str, depth: int = 2):
     store = get_store()
     depth = max(1, min(int(depth), 5))
-    neighbors = store.graph.get_neighbors(entity_id, max_depth=depth)
+    # graph load/traverse là blocking disk I/O — off-thread (block event loop
+    # khi graph.json lớn).
+    neighbors = await asyncio.to_thread(
+        lambda: store.graph.get_neighbors(entity_id, max_depth=depth)
+    )
     return {"entity_id": entity_id, "neighbors": neighbors[:100], "depth": depth}
 
 
@@ -356,4 +378,8 @@ async def audit_list(limit: int = 50, role: str = Depends(get_current_role)):
     if role not in ("ADMIN", "ARCHITECT"):
         raise HTTPException(status_code=403, detail="audit requires ADMIN/ARCHITECT")
     audit = AuditLog()
-    return {"entries": audit.list(limit), "verified": audit.verify_chain()}
+    # Đọc toàn bộ log file (≤10MB) + verify chain là blocking I/O — off-thread.
+    entries, verified = await asyncio.to_thread(
+        lambda: (audit.list(limit), audit.verify_chain())
+    )
+    return {"entries": entries, "verified": verified}
