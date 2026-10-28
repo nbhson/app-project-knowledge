@@ -27,12 +27,49 @@
 - **storage/vector.py:283-293** — `query(filters=...)` bỏ qua mọi filter trừ `lifecycle_states` mà không báo. Ghi nhận; thêm `raise` có thể phá caller đang (sai) dựa vào behavior im lặng — follow-up cần review callers.
 - **engines/ingestion/sync_manager.py:29-31** — cursor dùng `item_id` cuối làm cursor (connector Confluence/Jira hiểu nhầm là offset/token). Cần per-source page cursor design — follow-up.
 
+## Round 2 (2026-10-29) — Deep review + enterprise upgrade
+
+### Kết quả Review đợt 2
+
+| # | Severity | Vị trí | Vấn đề | Fix |
+|---|----------|--------|--------|-----|
+| R2-1 | MAJOR (perf) | git_connector.py `list_items` | 2 subprocess `git log` **mỗi file** — repo 500 files → 1000 processes | 1 lần `git log --name-only --format="%H %ct"` duy nhất → map path→(hash,ts) |
+| R2-2 | MAJOR (dup) | cli/main.py + api/main.py | Source-URL→connector + lifecycle→ACTIVE duplicated 2 nơi (~80 dòng) | `pkh/services/ingest.py`: `build_connector()`, `activate_to_active()` |
+| R2-3 | MODERATE (dup) | cli/main.py + api/main.py | Store singleton `_store_key_from_settings`/`_create_store` copy y nhau | `pkh/services/store.py`: shared factory `get_shared_store()` |
+| R2-4 | MODERATE (bug) | git_connector.py:102,105 | `_run(["git", ...])` bare "git" — bypass `_git()` (round 1 chỉ fix 1 chỗ) | Dùng `_git()` |
+| R2-5 | MODERATE (robust) | audit.py `list`/`verify_chain` | 1 dòng JSON hỏng → crash toàn bộ list/verify | Skip dòng malformed + warning; verify_chain vẫn fail-closed nếu chain sai |
+| R2-6 | MODERATE (ergonomics) | CLI | Không `--verbose/--quiet/--json/--config`, không progress feedback, exit code ingest luôn 0 dù fail, help tối giản | Global flags + Rich progress + exit codes chuẩn (0 ok / 1 runtime / 2 config) + `--config` |
+| R2-7 | MINOR (robust) | adapters/__init__.py | `except Exception: pass` quanh get_settings → config lỗi im lặng fallback MockAdapter | Chỉ swallow ConfigurationError có log; ném lại lỗi khác |
+| R2-8 | MINOR (dup) | graph.py | `upsert` vs `upsert_many` copy logic edge/node | Extract `_apply_ko()` |
+| R2-9 | MINOR (typing) | sync_manager, cli `_resolve_cli_adapter`, retriever | Thiếu type hints | Bổ sung |
+| R2-10 | MINOR | cli sync | Không setup_logging, không audit | Dùng chung ingest path |
+
+### Feature mới (đợt 2)
+
+1. **`pkh export`** — export KOs ra `json`/`csv`/`markdown`, filter theo lifecycle/entity_type, `--out FILE` (stdout nếu thiếu).
+2. **Logging modes** — `--verbose`/`--quiet`/`--json` global + env `PKH_LOG_LEVEL`; CLI mặc định human-readable console (không còn JSON noise trên terminal), API giữ JSON.
+3. **`pkh doctor`** — health check môi trường: config resolution, storage paths writable, git binary, audit chain, providers summary; exit 1 khi fail.
+4. **Global `--config` flag** — trỏ settings YAML tùy ý (trước đây chỉ qua env `PKH_CONFIG_FILE`).
+
+### Không sửa đợt 2 (ghi nhận tiếp)
+
+- sync_manager cursor = item_id cuối (cần per-source page cursor design — như round 1).
+- FAILED outbox claim trong `reconcile_pending` chưa atomic như PENDING (2 worker đồng thời có thể retry trùng — idempotent fan-out nên harmless; follow-up).
+- vector.query(filters=...) bỏ filter im lặng — giữ nguyên như round 1.
+
 ## Trạng thái
 
 - [x] Plan
-- [x] Fix #1–#13
+- [x] Fix #1–#13 (Round 1)
 - [x] `ast.parse` 10 files OK; pytest **87/87 pass** (unit 84 + integration 3)
 - [x] Commit + self-review
+
+## Round 2 Trạng thái
+
+- [x] Plan
+- [x] R2-1..R2-10 + features
+- [x] pytest green (baseline 87/87 với PYTHONPATH=src)
+- [x] Commits local-only + self-review
 
 ## Review Log
 
