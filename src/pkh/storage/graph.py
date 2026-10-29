@@ -60,11 +60,16 @@ class GraphStore:
         self._dirty = True
         await self._persist()
 
-    async def upsert(self, ko: KnowledgeObject, idempotency_key: str | None = None) -> None:
-        # if relationship type, add edge; else add node
-        # prefer typed fields source_id/target_id/relationship_type (new),
-        # fallback to legacy properties from/to/rel_type
+    def _apply_ko(self, ko: KnowledgeObject) -> None:
+        """Apply one KO to the graph: relationships become edges (with
+        ENTITY_REF placeholder nodes), everything else becomes a node.
+
+        Shared by upsert() and upsert_many() — the logic previously existed as
+        two drifting copies.
+        """
         if ko.object_type.value == "RELATIONSHIP":
+            # prefer typed fields source_id/target_id/relationship_type (new),
+            # fallback to legacy properties from/to/rel_type
             from_id = ko.source_id or ko.properties.get("from") or ko.properties.get("from_id")
             to_id = ko.target_id or ko.properties.get("to") or ko.properties.get("to_id")
             rel_type = (
@@ -86,40 +91,24 @@ class GraphStore:
                     from_id, to_id, relation=rel_type, confidence=ko.confidence, id=ko.id
                 )
         else:
-            await self.add_node(ko)
-            return
+            self.graph.add_node(
+                ko.id,
+                label=ko.entity_type.value if ko.entity_type else ko.object_type.value,
+                title=ko.title,
+                lifecycle_state=ko.lifecycle_state.value,
+                confidence=ko.confidence,
+                properties=ko.properties,
+            )
+
+    async def upsert(self, ko: KnowledgeObject, idempotency_key: str | None = None) -> None:
+        self._apply_ko(ko)
         self._dirty = True
         await self._persist()
 
     async def upsert_many(self, kos: list[KnowledgeObject]) -> None:
         for ko in kos:
-            # inline without per-item persist
-            if ko.object_type.value == "RELATIONSHIP":
-                from_id = ko.source_id or ko.properties.get("from") or ko.properties.get("from_id")
-                to_id = ko.target_id or ko.properties.get("to") or ko.properties.get("to_id")
-                rel_type = (
-                    (ko.relationship_type.value if ko.relationship_type else None)
-                    or ko.properties.get("rel_type")
-                    or ko.properties.get("relationship_type")
-                    or "RELATED_TO"
-                )
-                if from_id and to_id:
-                    if from_id not in self.graph:
-                        self.graph.add_node(from_id, label="ENTITY_REF", title=str(from_id))
-                    if to_id not in self.graph:
-                        self.graph.add_node(to_id, label="ENTITY_REF", title=str(to_id))
-                    self.graph.add_edge(
-                        from_id, to_id, relation=rel_type, confidence=ko.confidence, id=ko.id
-                    )
-            else:
-                self.graph.add_node(
-                    ko.id,
-                    label=ko.entity_type.value if ko.entity_type else ko.object_type.value,
-                    title=ko.title,
-                    lifecycle_state=ko.lifecycle_state.value,
-                    confidence=ko.confidence,
-                    properties=ko.properties,
-                )
+            # batch: apply all first, persist once (no per-item persist)
+            self._apply_ko(ko)
         self._dirty = True
         await self._persist()
 

@@ -196,7 +196,7 @@ class GovernanceConfig(BaseModel):
             raise ValueError(
                 "governance.rbac_enabled=true requires governance.jwt_secret to be set "
                 "(env: PKH_GOVERNANCE__JWT_SECRET, or governance.jwt_secret in settings YAML). "
-                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+                'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(48))"'
             )
         return self
 

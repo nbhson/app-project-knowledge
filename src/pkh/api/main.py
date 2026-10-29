@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, field_validator
-
-from dataclasses import asdict
 
 from pkh.adapters import get_adapter
 from pkh.api.auth import get_current_role, require_permission
@@ -22,6 +21,7 @@ from pkh.services.ingest import (
 )
 from pkh.services.query import run_query_pipeline
 from pkh.services.runtime import SharedStore
+from pkh.storage.unified import KnowledgeStore
 from pkh.utils.logging import get_logger, setup_logging
 
 setup_logging()
@@ -205,7 +205,9 @@ async def query(req: QueryRequest, role: str = Depends(require_permission("query
         # str(e) của AdapterError/ConfigurationError nhúng upstream URL + status
         # + ≤500 ký tự response body — KHÔNG trả client; chỉ log server-side.
         logger.warning(f"adapter configuration error: {e}")
-        raise HTTPException(status_code=400, detail="LLM provider is not configured correctly") from e
+        raise HTTPException(
+            status_code=400, detail="LLM provider is not configured correctly"
+        ) from e
     except AdapterError as e:
         logger.error(f"adapter error: {e}")
         raise HTTPException(status_code=502, detail="Upstream LLM provider failed") from e
@@ -297,7 +299,5 @@ async def audit_list(limit: int = 50, role: str = Depends(get_current_role)):
         raise HTTPException(status_code=403, detail="audit requires ADMIN/ARCHITECT")
     audit = AuditLog()
     # Đọc toàn bộ log file (≤10MB) + verify chain là blocking I/O — off-thread.
-    entries, verified = await asyncio.to_thread(
-        lambda: (audit.list(limit), audit.verify_chain())
-    )
+    entries, verified = await asyncio.to_thread(lambda: (audit.list(limit), audit.verify_chain()))
     return {"entries": entries, "verified": verified}

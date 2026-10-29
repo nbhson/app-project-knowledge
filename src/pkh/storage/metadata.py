@@ -230,7 +230,10 @@ class MetadataStore:
                 # Escape LIKE wildcards: user-controlled % / _ trước đây hoạt động
                 # như wildcard → filter bypass / scan rộng bất ngờ.
                 st_escaped = (
-                    st.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace('"', '""')
+                    st.replace("\\", "\\\\")
+                    .replace("%", "\\%")
+                    .replace("_", "\\_")
+                    .replace('"', '""')
                 )
                 stmt = stmt.where(
                     KnowledgeRow.source_references.like(
@@ -261,9 +264,7 @@ class MetadataStore:
                 .replace('"', '""')
             )
             stmt = select(KnowledgeRow).where(
-                KnowledgeRow.source_references.like(
-                    f'%"source_id": "{sid_escaped}"%', escape="\\"
-                )
+                KnowledgeRow.source_references.like(f'%"source_id": "{sid_escaped}"%', escape="\\")
             )
             rows = session.execute(stmt).scalars().all()
             result = []

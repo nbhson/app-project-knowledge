@@ -7,8 +7,6 @@ copies. This module is the single implementation.
 
 from __future__ import annotations
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -80,7 +78,9 @@ def build_extraction_pipeline(settings: Settings) -> ExtractionPipeline:
     return ExtractionPipeline(
         llm_enabled=settings.extraction.llm_enabled,
         llm_adapter=(
-            get_adapter(settings.extraction.llm_adapter) if settings.extraction.llm_enabled else None
+            get_adapter(settings.extraction.llm_adapter)
+            if settings.extraction.llm_enabled
+            else None
         ),
         budget_tokens=settings.extraction.budget_per_run_tokens,
         batch_size=settings.extraction.batch_size,

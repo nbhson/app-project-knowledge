@@ -5,6 +5,10 @@ from pkh.adapters.gemini import GeminiAdapter
 from pkh.adapters.gpt import GPTAdapter
 from pkh.adapters.local import LocalLLMAdapter
 from pkh.adapters.mock import MockAdapter
+from pkh.utils.exceptions import ConfigurationError
+from pkh.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 ADAPTERS = {
     "mock": MockAdapter,
@@ -69,8 +73,10 @@ def get_adapter(
                 embedding_model=embedding_model,
                 timeout_seconds=timeout_seconds,
             )
-    except Exception:
-        pass
+    except ConfigurationError as e:
+        # settings load failed (e.g. RBAC enabled without jwt_secret) — do not
+        # silently fall back to MockAdapter and hide the misconfiguration.
+        logger.warning(f"Could not load settings while resolving adapter '{name}': {e}")
     cls = ADAPTERS.get(lowered, MockAdapter)
     return cls()
 

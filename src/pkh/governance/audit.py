@@ -99,25 +99,44 @@ class AuditLog:
             logger.info(f"Audit: {action} by {actor} on {resource}")
             return entry
 
+    def _parse_entries(self) -> list[dict]:
+        """Parse all entries, skipping malformed lines with a warning (R2-5).
+
+        A single corrupted/truncated JSON line (e.g. crash mid-append) must not
+        make list()/verify_chain() crash wholesale. Chain verification itself
+        remains fail-closed: hash mismatches still return False.
+        """
+        entries: list[dict] = []
+        lines = self.path.read_text().strip().splitlines()
+        for lineno, line in enumerate(lines, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning(f"Audit line {lineno} is not valid JSON, skipping")
+                continue
+            if not isinstance(obj, dict):
+                logger.warning(f"Audit line {lineno} is not an object, skipping")
+                continue
+            entries.append(obj)
+        return entries
+
     def list(self, limit: int = 100) -> list[dict]:
         if not self.path.exists():
             return []
         # Use lock for consistent read
         with self._lock:
-            lines = self.path.read_text().strip().splitlines()
-            entries = [json.loads(line) for line in lines if line.strip()]
-            return entries[-limit:]
+            return self._parse_entries()[-limit:]
 
     def verify_chain(self) -> bool:
         if not self.path.exists():
             return True
         with self._lock:
-            lines = self.path.read_text().strip().splitlines()
+            entries = self._parse_entries()
         prev = "0" * 64
-        for line in lines:
-            if not line.strip():
-                continue
-            entry = json.loads(line)
+        for entry in entries:
             # do not mutate original entry
             entry_copy = dict(entry)
             h = entry_copy.pop("hash", None)
