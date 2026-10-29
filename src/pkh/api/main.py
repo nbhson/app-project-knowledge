@@ -10,62 +10,35 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, field_validator
 
+from dataclasses import asdict
+
 from pkh.adapters import get_adapter
 from pkh.api.auth import get_current_role, require_permission
 from pkh.config.settings import get_settings
-from pkh.engines.extraction.pipeline import ExtractionPipeline
-from pkh.engines.ingestion.confluence_connector import ConfluenceConnector
-from pkh.engines.ingestion.document_connector import DocumentConnector
-from pkh.engines.ingestion.git_connector import GitConnector
-from pkh.engines.ingestion.jira_connector import JiraConnector
-from pkh.engines.ingestion.sync_manager import SyncManager
 from pkh.governance.audit import AuditLog
+from pkh.services.ingest import (
+    IngestOutcome,
+    ingest_source,
+)
 from pkh.services.query import run_query_pipeline
-from pkh.storage.unified import KnowledgeStore
+from pkh.services.runtime import SharedStore
 from pkh.utils.logging import get_logger, setup_logging
 
 setup_logging()
 logger = get_logger(__name__)
 
-# Singleton store per fix-plan 1.6
-_store: KnowledgeStore | None = None
-_store_key: tuple[str, str, str] | None = None
-
-
-def _store_key_from_settings() -> tuple[str, str, str]:
-    s = get_settings()
-    return (
-        s.storage.metadata.sqlite_path,
-        s.storage.vector.path,
-        s.storage.graph.persist_path,
-    )
-
-
-def _create_store() -> KnowledgeStore:
-    s = get_settings()
-    return KnowledgeStore(
-        metadata_path=s.storage.metadata.sqlite_path,
-        vector_path=s.storage.vector.path,
-        graph_path=s.storage.graph.persist_path,
-    )
+# Singleton store per fix-plan 1.6 (Round 2: shared implementation in
+# pkh.services.runtime — previously duplicated with cli/main.py)
+_shared_store = SharedStore()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _store, _store_key
-    key = _store_key_from_settings()
-    _store = _create_store()
-    _store_key = key
+    _store = _shared_store.get()
     yield
     # Shutdown: dispose engines/clients (SQLite engine, Chroma client) — trước
     # đây store sống sót qua shutdown, giữ file handles + Chroma client mở.
-    if _store is not None:
-        try:
-            _store.close()
-        except Exception as e:
-            logger.warning(f"store close on shutdown: {e}")
-        _store = None
-        _store_key = None
+    _shared_store.close()
 
 
 app = FastAPI(
@@ -74,12 +47,7 @@ app = FastAPI(
 
 
 def get_store() -> KnowledgeStore:
-    global _store, _store_key
-    key = _store_key_from_settings()
-    if _store is None or _store_key != key:
-        _store = _create_store()
-        _store_key = key
-    return _store
+    return _shared_store.get()
 
 
 _ALLOWED_SCHEMES = {"git", "confluence", "jira", "document", "file", "http", "https"}
@@ -183,82 +151,32 @@ async def ingest(req: IngestRequest, role: str = Depends(require_permission("ing
                             raise HTTPException(status_code=400, detail=f"blocked path: {rp}")
             except HTTPException:
                 raise
-            except Exception:
-                pass
+            except Exception as e:  # defensive: never let a bad path crash validation
+                logger.warning(f"source path check skipped for {src}: {e}")
     settings = get_settings()
     sources = req.sources or ([req.source] if req.source else [])
     if not sources:
         # default to local docs
         sources = ["git://./"]
     store = get_store()
-    all_kos = []
+    outcomes: list[IngestOutcome] = []
     for src in sources:
-        # parse source url — support all 4 schemes like CLI
-        conn: object
-        if src.startswith("git://"):
-            git_path = src[6:]
-            conn = GitConnector(repo_url=git_path)
-        elif src.startswith("confluence://"):
-            space = src[len("confluence://") :]
-            conn = ConfluenceConnector(
-                base_url=settings.sources.confluence.url, spaces=[space] if space else []
-            )
-        elif src.startswith("jira://"):
-            proj = src[len("jira://") :]
-            conn = JiraConnector(
-                base_url=settings.sources.jira.url, projects=[proj] if proj else []
-            )
-        elif src.startswith("document://"):
-            doc_path = src[len("document://") :]
-            conn = DocumentConnector(paths=[doc_path])
-        else:
-            # treat as git local
-            conn = GitConnector(repo_url=src)
-        mgr = SyncManager([conn])  # type: ignore[list-item]
-        items = await mgr.collect_all()
-
-        pipeline = ExtractionPipeline(
-            llm_enabled=settings.extraction.llm_enabled,
-            llm_adapter=(
-                get_adapter(settings.extraction.llm_adapter)
-                if settings.extraction.llm_enabled
-                else None
-            ),
-            budget_tokens=settings.extraction.budget_per_run_tokens,
-            batch_size=settings.extraction.batch_size,
-        )
-        kos, stats = await pipeline.run(items)
-        # Transition via state machine to ACTIVE for querying
-        from pkh.models.knowledge import LifecycleState
-        from pkh.models.lifecycle import transition as lifecycle_transition
-
-        transitioned = []
-        for ko in kos:
-            cur = ko.lifecycle_state
-            try:
-                if cur == LifecycleState.DISCOVERED:
-                    ko = lifecycle_transition(ko, LifecycleState.EXTRACTED, reason="ingest")
-                    ko = lifecycle_transition(ko, LifecycleState.VALIDATING, reason="ingest")
-                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE, reason="ingest")
-                elif cur == LifecycleState.EXTRACTED:
-                    ko = lifecycle_transition(ko, LifecycleState.VALIDATING, reason="ingest")
-                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE, reason="ingest")
-                elif cur == LifecycleState.VALIDATING:
-                    ko = lifecycle_transition(ko, LifecycleState.ACTIVE, reason="ingest")
-            except Exception as e:
-                # do not cheat state-machine: keep original state and log
-                logger.warning(f"Lifecycle transition failed for {ko.id}: {e}")
-            transitioned.append(ko)
-        kos = transitioned
-        await store.save(kos)
-        all_kos.extend(kos)
-
+        outcomes.append(await ingest_source(store, src, settings, reason="ingest"))
+    ingested_count = sum(o.kos_extracted for o in outcomes)
     audit = AuditLog()
     # Blocking disk I/O trong async handler block event loop — wrap to_thread.
     await asyncio.to_thread(
-        audit.log, "ingest", actor=role, resource=",".join(sources), details={"count": len(all_kos)}
+        audit.log,
+        "ingest",
+        actor=role,
+        resource=",".join(sources),
+        details={"count": ingested_count, "failed": sum(1 for o in outcomes if not o.ok)},
     )
-    return {"ingested": len(all_kos), "sources": sources}
+    return {
+        "ingested": ingested_count,
+        "sources": sources,
+        "results": [asdict(o) for o in outcomes],
+    }
 
 
 @app.get("/ingest/status")
