@@ -41,6 +41,29 @@ async def _run(cmd: list[str], cwd: Path | None = None) -> str:
     return result.stdout.strip()
 
 
+async def _git_file_metadata(repo: Path) -> dict[str, tuple[str, int]]:
+    """One `git log` pass mapping path -> (commit_hash, commit_timestamp).
+
+    Round 2 perf fix: previously issued TWO `git log -1` subprocesses per file
+    (hash, then timestamp) — a 500-file repo spawned 1000 processes per ingest.
+    """
+    out = await _run([_git(), "log", "--name-only", "--format=%x00%H %ct"], cwd=repo)
+    # newest-first global log; first occurrence per path = latest change
+    meta: dict[str, tuple[str, int]] = {}
+    current_hash = ""
+    current_ts = ""
+    for line in out.splitlines():
+        if line.startswith("\x00"):
+            parts = line[1:].split(" ", 1)
+            current_hash = parts[0] if parts else ""
+            current_ts = parts[1].strip() if len(parts) > 1 else ""
+        elif line.strip() and current_hash:
+            path = line.strip()
+            if path not in meta and current_ts.isdigit():
+                meta[path] = (current_hash, int(current_ts))
+    return meta
+
+
 EXT_LANG_MAP = {
     ".py": "python",
     ".ts": "typescript",
@@ -124,7 +147,7 @@ class GitConnector:
         if self._is_git_repo():
             try:
                 out = await _run(
-                    ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+                    [_git(), "ls-files", "--cached", "--others", "--exclude-standard"],
                     cwd=self.local_path,
                 )
                 files = [self.local_path / f for f in out.splitlines() if f.strip()]
@@ -137,6 +160,15 @@ class GitConnector:
                     p for p in self.local_path.rglob("*") if p.is_file() and ".git" not in p.parts
                 ]
             )
+
+        # one git-log pass for all commit metadata (R2: previously 2 subprocesses
+        # per file — hash and timestamp — i.e. 2N processes for N files)
+        commit_meta: dict[str, tuple[str, int]] = {}
+        if self._is_git_repo():
+            try:
+                commit_meta = await _git_file_metadata(self.local_path)
+            except Exception as e:
+                logger.warning(f"git log metadata pass failed, falling back to mtime: {e}")
 
         for f in files:
             # skip cache/build artifacts; only skip well-known dirs, not any dotfile
@@ -171,24 +203,14 @@ class GitConnector:
             rel = str(f.relative_to(self.local_path))
             ext = f.suffix.lower()
             lang = EXT_LANG_MAP.get(ext, "text")
-            # try to get last commit info + commit time (avoid now() skew)
+            # prefer last-commit info from the single metadata pass; fall back
+            # to file mtime when the file is untracked or git log failed
             commit_hash = ""
             commit_time: datetime | None = None
-            if self._is_git_repo():
-                try:
-                    commit_hash = await _run(
-                        [_git(), "log", "-1", "--format=%H", "--", rel], cwd=self.local_path
-                    )
-                except Exception:
-                    commit_hash = ""
-                try:
-                    ts = await _run(
-                        [_git(), "log", "-1", "--format=%ct", "--", rel], cwd=self.local_path
-                    )
-                    if ts.strip().isdigit():
-                        commit_time = datetime.fromtimestamp(int(ts.strip()), tz=timezone.utc)
-                except Exception:
-                    commit_time = None
+            meta = commit_meta.get(rel)
+            if meta:
+                commit_hash, ts = meta
+                commit_time = datetime.fromtimestamp(ts, tz=timezone.utc)
             if commit_time is None:
                 try:
                     commit_time = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
