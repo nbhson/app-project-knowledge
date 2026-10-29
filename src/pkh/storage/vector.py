@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pkh.models.knowledge import (
@@ -175,8 +176,15 @@ class ChromaVectorStore:
         self._use_fallback = False
         try:
             import chromadb
+            from chromadb.config import Settings as ChromaSettings
 
-            self._client = chromadb.PersistentClient(path=path)
+            # chroma 0.5.x fires ClientStartEvent even with anonymized_telemetry
+            # disabled (and its posthog calls error noisily against newer
+            # posthog) — silence its telemetry logger so CLI output stays clean.
+            logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.CRITICAL + 1)
+            self._client = chromadb.PersistentClient(
+                path=path, settings=ChromaSettings(anonymized_telemetry=False)
+            )
             self._collection = self._client.get_or_create_collection(name=collection)
             self._reconcile()
         except Exception as e:
