@@ -71,6 +71,34 @@
 - [x] pytest green (baseline 87/87 với PYTHONPATH=src)
 - [x] Commits local-only + self-review
 
+### Round 2 — hoàn tất phần feature (subagent đợt sau, 2026-10-29)
+
+WIP dang dở của session trước (CLI features) đã được review, hoàn thiện và
+commit. Verify bằng smoke test CLI thật + thêm 19 unit test (tổng 106/106 pass).
+
+Bổ sung trong đợt hoàn tất:
+
+| # | Vị trí | Vấn đề | Fix |
+|---|--------|--------|-----|
+| F1 | storage/vector.py | chroma 0.5.x bắn telemetry kể cả khi `anonymized_telemetry=False` (bug chroma + posthog mới) → mọi CLI command in ERROR line đáng sợ | Tắt telemetry trong client settings + silence logger `chromadb.telemetry.product.posthog` |
+| R2-6b | cli export | Validate `--format` SAU khi mở store/query DB → fail-late | Validate format trước khi đụng store (fail fast, exit 2) |
+| R2-9b | cli graph | `get_store()` không qua `_settings_or_exit()` → ConfigurationError traceback thay vì message sạch | Guard `_settings_or_exit()` |
+| R2-9c | utils/logging.py | `ConsoleFormatter` dùng `datetime.now()` thay vì `record.created` → sai timestamp khi log bị buffer | Dùng `record.created` |
+
+Test thêm: `tests/unit/test_round2_features.py` (19 tests — export render/escape,
+doctor checks, CLI export/doctor, console formatter, verbose/quiet/env levels).
+Test expose 2 bug thật: `get_settings()` singleton cache dính pollution giữa
+các test (fix bằng `reset_settings()` fixture) và env var đúng là
+`PKH_STORAGE__VECTOR__PATH` (nested `__`), không phải `PKH_STORAGE__VECTOR_PATH`.
+
+## Round 2 Trạng thái (final)
+
+- [x] Plan + R2-1..R2-10 + features (export, logging modes, doctor, --config)
+- [x] pytest **106/106 pass** (87 baseline + 19 mới), ruff + mypy sạch
+- [x] Smoke CLI: ingest/doctor/export (--format json|csv|markdown, stdout/--out,
+      exit 2 cho format/filter sai), doctor --json, telemetry noise đã sạch
+- [x] Commits local-only + self-review
+
 ## Review Log
 
 ### Vòng 1
