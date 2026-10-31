@@ -1,5 +1,7 @@
 # PKH - Project Knowledge Harness
 
+[![CI](https://github.com/nbhson/app-project-knowledge/actions/workflows/ci.yml/badge.svg)](https://github.com/nbhson/app-project-knowledge/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 > Transform fragmented project information into a continuously evolving, connected, model-independent knowledge system.
 
 > ✅ **Status: Implementation In Progress — `src/` exists (scaffold 06/09, 36 tests, 67.79% coverage).** Architecture & **45-day** plan are documented and reviewed; Phase 0-1 partial is scaffolded. Verify: `PYTHONPATH=src pytest --cov`. See `docs/plan/plan.md#current-status` and `docs/plan/fix-plan.md` for verification gates.
