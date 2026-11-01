@@ -180,7 +180,7 @@ async def ingest(req: IngestRequest, role: str = Depends(require_permission("ing
 
 
 @app.get("/ingest/status")
-async def ingest_status():
+async def ingest_status(role: str = Depends(require_permission("health"))):
     store = get_store()
     hc = await store.health_check()
     return hc
@@ -238,7 +238,7 @@ async def context(req: ContextRequest, role: str = Depends(require_permission("c
 
 
 @app.get("/providers")
-async def providers():
+async def providers(role: str = Depends(require_permission("query"))):
     """List configured LLM providers (secrets redacted)."""
     settings = get_settings()
     out: dict[str, dict] = {}
@@ -267,7 +267,7 @@ async def providers():
 
 
 @app.get("/knowledge/{id}")
-async def get_knowledge(id: str):
+async def get_knowledge(id: str, role: str = Depends(require_permission("query"))):
     store = get_store()
     ko = await store.get(id)
     if not ko:
@@ -276,7 +276,9 @@ async def get_knowledge(id: str):
 
 
 @app.get("/graph/explore")
-async def graph_explore(entity_id: str, depth: int = 2):
+async def graph_explore(
+    entity_id: str, depth: int = 2, role: str = Depends(require_permission("graph"))
+):
     store = get_store()
     depth = max(1, min(int(depth), 5))
     # graph load/traverse là blocking disk I/O — off-thread (block event loop
@@ -288,7 +290,7 @@ async def graph_explore(entity_id: str, depth: int = 2):
 
 
 @app.get("/sources/status")
-async def sources_status():
+async def sources_status(role: str = Depends(require_permission("query"))):
     settings = get_settings()
     return {"sources": settings.sources.model_dump()}
 
