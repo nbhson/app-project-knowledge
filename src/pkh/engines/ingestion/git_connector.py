@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,8 +38,41 @@ async def _run(cmd: list[str], cwd: Path | None = None) -> str:
         subprocess.run, cmd, capture_output=True, text=True, cwd=cwd, timeout=30
     )
     if result.returncode != 0:
-        raise SourceError(f"git command failed {' '.join(cmd)}: {result.stderr}")
+        # stderr can echo tokens/paths — log full detail, return generic message
+        logger.warning(f"git command failed {' '.join(cmd)}: {result.stderr.strip()}")
+        raise SourceError(f"git command failed: {cmd[0]} (exit {result.returncode})")
     return result.stdout.strip()
+
+
+# TTL for auto-cleanup of temp clone dirs (pkh_git_<hash>) that are never
+# removed explicitly — otherwise they accumulate in the system tempdir forever.
+_GIT_CLONE_PREFIX = "pkh_git_"
+_GIT_CLONE_TTL_HOURS = 24
+
+
+def _cleanup_stale_clones(max_age_hours: int = _GIT_CLONE_TTL_HOURS) -> list[Path]:
+    """Delete temp clone dirs (pkh_git_<hash>) older than the TTL. Best-effort."""
+    import tempfile
+    import time
+
+    removed: list[Path] = []
+    try:
+        candidates = list(Path(tempfile.gettempdir()).glob(f"{_GIT_CLONE_PREFIX}*"))
+    except OSError:
+        return removed
+    cutoff = time.time() - max_age_hours * 3600
+    for d in candidates:
+        if not d.is_dir():
+            continue
+        try:
+            if d.stat().st_mtime < cutoff:
+                shutil.rmtree(d, ignore_errors=True)
+                removed.append(d)
+        except OSError:
+            continue
+    if removed:
+        logger.info(f"Cleaned up {len(removed)} stale git clone dir(s) older than {max_age_hours}h")
+    return removed
 
 
 async def _git_file_metadata(repo: Path) -> dict[str, tuple[str, int]]:
@@ -103,11 +137,13 @@ class GitConnector:
         elif local_path:
             self.local_path = Path(local_path)
         else:
-            # temp clone path — cross-platform via tempfile.gettempdir()
+            # temp clone path — cross-platform via tempfile.gettempdir();
+            # opportunistically sweep stale clones (>24h old) while we're here
             import tempfile
 
             h = hashlib.md5(repo_url.encode(), usedforsecurity=False).hexdigest()[:8]
-            self.local_path = Path(tempfile.gettempdir()) / f"pkh_git_{h}"
+            self.local_path = Path(tempfile.gettempdir()) / f"{_GIT_CLONE_PREFIX}{h}"
+            _cleanup_stale_clones()
         self._file_cache: dict[str, RawItem] = {}
 
     async def connect(self) -> None:

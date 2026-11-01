@@ -32,10 +32,10 @@ def get_current_role(
             raise HTTPException(status_code=401, detail="Invalid token")
         secret = getattr(settings.governance, "jwt_secret", None)
         algorithm = getattr(settings.governance, "jwt_algorithm", "HS256")
-        # If no secret configured, decode without verification for test/dev (extract role claim)
+        # If no secret configured, fail-closed for test/dev (extract role claim)
         try:
-            # import lazily to avoid hard dependency at import time
-            from jose import jwt
+            # import lazily to avoid hard dependency at import time (PyJWT)
+            import jwt
         except ImportError as e:
             raise HTTPException(status_code=500, detail=f"JWT support missing: {e}") from e
         try:
@@ -49,7 +49,7 @@ def get_current_role(
                 )
         except HTTPException:
             raise
-        except Exception as e:  # JWTError
+        except Exception as e:  # jwt.PyJWTError (InvalidTokenError, ExpiredSignatureError, ...)
             # str(e) của JWT lib có thể echo token segments/claims — generic message.
             logger.warning(f"JWT validation failed: {e}")
             raise HTTPException(status_code=401, detail="Invalid token") from e

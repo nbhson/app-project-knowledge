@@ -15,5 +15,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]" || pip install -e . pytest pytest-asyncio pytest-cov
-      - name: Run tests
-        run: pytest
+      - name: Run tests with coverage gate
+        # Coverage source + fail_under live in pyproject.toml ([tool.coverage.*]).
+        # TODO: raise fail_under gradually as coverage improves (currently ~73.7%).
+        run: pytest --cov --cov-report=term-missing
